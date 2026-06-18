@@ -52,56 +52,78 @@ export function chunkText(text: string): string[] {
 //   - Explicit override: GRAPH_BACKEND=groq forces Groq regardless of Ollama
 // ────────────────────────────────────────────────────────────────────
 
-let resolvedBackend: "ollama" | "groq" | "local-openai" | null = null;
+let resolvedBackend: "ollama" | "groq" | "local-openai" | "deepseek" | null = null;
 
-async function detectBackend(): Promise<"ollama" | "groq" | "local-openai"> {
+async function detectBackend(): Promise<"ollama" | "groq" | "local-openai" | "deepseek"> {
   // Explicit override takes highest priority
   const envBackend = process.env.GRAPH_BACKEND?.toLowerCase();
+  if (envBackend === "deepseek") return "deepseek";
   if (envBackend === "groq") return "groq";
   if (envBackend === "ollama") return "ollama";
   if (envBackend === "local-openai") return "local-openai";
 
-  // Auto-detect: try to reach Ollama
+  // Auto-detect: DeepSeek first (verified working key)
+  if (process.env.DEEPSEEK_API_KEY) {
+    try {
+      await axios.get("https://api.deepseek.com/v1/models", {
+        headers: { Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}` },
+        timeout: 5000,
+      });
+      logger.success("[ArcRift] DeepSeek API detected — graph extraction via cloud");
+      return "deepseek";
+    } catch {
+      // fall through
+    }
+  }
+
+  // Try local Ollama
   try {
     const ollamaUrl = process.env.OLLAMA_URL ?? "http://localhost:11434";
     await axios.get(`${ollamaUrl}/api/tags`, { timeout: 2000 });
-    logger.success("[ArcRift] Ollama detected — graph extraction will run locally (fully private)");
+    logger.success("[ArcRift] Ollama detected — graph extraction locally");
     return "ollama";
   } catch {
-    // Try Local OpenAI (LM Studio / LocalAI)
-    try {
-      const localUrl = process.env.LOCAL_OPENAI_URL ?? "http://localhost:1234/v1";
-      await axios.get(`${localUrl}/models`, { timeout: 2000 });
-      logger.success("[ArcRift] LM Studio / LocalAI detected — using local OpenAI-compatible backend");
-      return "local-openai";
-    } catch {
-      if (process.env.GROQ_API_KEY) {
-        logger.warn(
-          "[ArcRift] Local LLM (Ollama/LM Studio) not available — falling back to Groq API. " +
-          "Note: PII-scrubbed conversation text will leave your machine via Groq."
-        );
-        return "groq";
-      } else {
-        logger.warn(
-          "[ArcRift] No local LLM found and GROQ_API_KEY missing. " +
-          "Graph extraction disabled — install Ollama or set GROQ_API_KEY in backend/.env"
-        );
-        return "groq";
-      }
+    // Try Groq
+    if (process.env.GROQ_API_KEY) {
+      logger.warn("[ArcRift] Local LLM unavailable — falling back to Groq.");
+      return "groq";
     }
+    logger.warn("[ArcRift] No graph extraction backend available. Install Ollama or set DEEPSEEK_API_KEY.");
+    return "groq";
   }
 }
 
-async function getBackend(): Promise<"ollama" | "groq" | "local-openai"> {
+async function getBackend(): Promise<"ollama" | "groq" | "local-openai" | "deepseek"> {
   if (!resolvedBackend) {
     resolvedBackend = await detectBackend();
   }
   return resolvedBackend;
 }
 
-/** @internal - For test cleanup only */
 export function _resetBackendForTest() {
   resolvedBackend = null;
+}
+
+// ── DeepSeek API call ────────────────────────────────────────────
+async function callDeepSeek(prompt: string, maxTokens = 1000): Promise<string> {
+  const model = process.env.DEEPSEEK_MODEL ?? "deepseek-chat";
+  const response = await axios.post(
+    "https://api.deepseek.com/v1/chat/completions",
+    {
+      model,
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: maxTokens,
+      temperature: 0.1,
+    },
+    {
+      headers: {
+        "Authorization": `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      timeout: 30000,
+    }
+  );
+  return response.data.choices[0].message.content;
 }
 
 // ── Groq LLM call ─────────────────────────────────────────────────
@@ -166,26 +188,25 @@ async function callLocalOpenAI(prompt: string, maxTokens = 1000): Promise<string
 // ── Unified LLM call with Retry Logic (Backoff) ───────────────────
 async function _llm(prompt: string, maxTokens = 1000): Promise<string> {
   const backend = await getBackend();
-  const MAX_RETRIES = 3; // Reduced total retries but made each smarter
+  const MAX_RETRIES = 3;
   let lastErr: any = null;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       if (attempt > 0) {
-        const waitTime = attempt * 15000; // 15s, 30s, 45s...
+        const waitTime = attempt * 15000;
         logger.info(`[ArcRift] LLM call retry ${attempt}/${MAX_RETRIES} in ${waitTime / 1000}s...`);
         await sleep(waitTime);
       }
 
       let res: string;
-      if (backend === "ollama") {
+      if (backend === "deepseek") {
+        res = await callDeepSeek(prompt, maxTokens);
+      } else if (backend === "ollama") {
         try {
           res = await callOllama(prompt, maxTokens);
         } catch (err: any) {
-          const isDown = err.code === "ECONNREFUSED" ||
-            err.code === "ENOTFOUND" ||
-            err.message?.includes("ECONNREFUSED") ||
-            err.message?.includes("connection refused");
+          const isDown = err.code === "ECONNREFUSED" || err.code === "ENOTFOUND";
           if (isDown && process.env.GROQ_API_KEY) {
             logger.warn(`[ArcRift] Ollama unreachable — falling back to Groq.`);
             res = await callGroq(prompt, maxTokens);
@@ -197,10 +218,7 @@ async function _llm(prompt: string, maxTokens = 1000): Promise<string> {
         try {
           res = await callLocalOpenAI(prompt, maxTokens);
         } catch (err: any) {
-          const isDown = err.code === "ECONNREFUSED" ||
-            err.code === "ENOTFOUND" ||
-            err.message?.includes("ECONNREFUSED") ||
-            err.message?.includes("connection refused");
+          const isDown = err.code === "ECONNREFUSED" || err.code === "ENOTFOUND";
           if (isDown && process.env.GROQ_API_KEY) {
             logger.warn(`[ArcRift] Local OpenAI unreachable — falling back to Groq.`);
             res = await callGroq(prompt, maxTokens);
@@ -223,12 +241,11 @@ async function _llm(prompt: string, maxTokens = 1000): Promise<string> {
       const isBadFormat = err?.message?.includes("JSON") || err?.message?.includes("formatting");
 
       if ((isRateLimit || isTimeout || isBadFormat) && attempt < MAX_RETRIES) {
-        if (isTimeout) logger.warn(`[ArcRift] LLM timeout (attempt ${attempt + 1}). Model might be loading or hardware is slow.`);
+        if (isTimeout) logger.warn(`[ArcRift] LLM timeout (attempt ${attempt + 1}).`);
         if (isBadFormat) logger.warn("[ArcRift] Model returned malformed data. Retrying...");
         continue;
       }
 
-      // Permanent failure
       logger.error(`[ArcRift] LLM call failed permanently: ${err.message}`);
       throw err;
     }

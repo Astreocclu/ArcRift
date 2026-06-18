@@ -1,85 +1,40 @@
-// Generates vector embeddings using Ollama (local, free, no rate limits)
-// Model: nomic-embed-text (runs on CPU, ~500MB)
-
+// Embeddings via local Ollama nomic-embed-text (137M param, pure embedding, NOT an LLM).
+// No generation, no chat, no tokens consumed. Pure text → vector.
+// keep_alive=0 unloads the model immediately after each call so the ~290MB runner
+// footprint is held only for the duration of the embedding (RAM-starved host).
 import axios from "axios";
 import { logger } from "../utils/logger";
-import { getSettings } from "../utils/settings";
 
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
+const MODEL = "nomic-embed-text:latest";
+const KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE ?? 0;
+const MAX_RETRIES = 3;
 
 export async function generateEmbedding(text: string, task: "query" | "document" = "query"): Promise<number[]> {
-  const settings = getSettings();
-  const EMBED_MODEL = settings.ollamaEmbeddingModel || process.env.OLLAMA_EMBED_MODEL || "nomic-embed-text";
-  const MAX_RETRIES = 3;
-
-  // nomic-embed-text requires specific prefixes for optimal performance
-  const prefix = EMBED_MODEL.includes("nomic-embed-text") 
-    ? (task === "query" ? "search_query: " : "search_document: ") 
-    : "";
-  
+  const prefix = task === "query" ? "search_query: " : "search_document: ";
   const prompt = `${prefix}${text}`;
-  
+
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      if (attempt > 0) {
-        await new Promise(r => setTimeout(r, 5000 * attempt));
-        logger.debug(`[ArcRift] Retrying embedding generation (attempt ${attempt}/${MAX_RETRIES})...`);
-      }
-
-      const response = await axios.post(`${OLLAMA_URL}/api/embeddings`, {
-        model: EMBED_MODEL,
-        prompt: prompt,
-      }, { timeout: 60000 });
-      
-      return response.data.embedding as number[];
+      if (attempt > 0) await new Promise(r => setTimeout(r, 2000 * attempt));
+      const resp = await axios.post(`${OLLAMA_URL}/api/embeddings`, { model: MODEL, prompt, keep_alive: KEEP_ALIVE }, { timeout: 30000 });
+      return resp.data.embedding as number[];
     } catch (err: any) {
-      const isTimeout = err.code === "ECONNABORTED" || err.message?.includes("timeout");
-      const isOllamaDown = err.code === "ECONNREFUSED";
-
-      if (isOllamaDown) {
-        throw new Error("Ollama is not running. Start it with: ollama serve");
-      }
-
-      if (isTimeout && attempt < MAX_RETRIES) {
-        logger.warn(`[ArcRift] Embedding timeout. Ollama might be busy or model is loading.`);
-        continue;
-      }
-
-      logger.error("Embedding generation failed:", err?.message);
-      throw new Error(`Ollama embedding failed (${EMBED_MODEL}). Is it pulled? Run: ollama pull ${EMBED_MODEL}`);
+      if (attempt < MAX_RETRIES) continue;
+      throw new Error(`Embedding failed: ${err.message}`);
     }
   }
-  throw new Error("Embedding generation failed after retries.");
+  throw new Error("Embedding failed after retries.");
 }
 
-/**
- * Generate embeddings in batches to prevent overwhelming local hardware/Ollama.
- * Previously, 100 chunks = 100 concurrent HTTP calls (timed out).
- * Now we process in chunks of 5 with a tiny rest between batches.
- */
 export async function generateEmbeddings(texts: string[], task: "query" | "document" = "document"): Promise<number[][]> {
-  const BATCH_SIZE = 3; // Reduced batch size for low-end PCs
   const results: number[][] = [];
-  
-  for (let i = 0; i < texts.length; i += BATCH_SIZE) {
-    const batch = texts.slice(i, i + BATCH_SIZE);
-    logger.debug(`[ArcRift] Embedding batch ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(texts.length/BATCH_SIZE)}...`);
-    
-    try {
-      // Process this batch in parallel
-      const batchResults = await Promise.all(batch.map(text => generateEmbedding(text, task)));
-      results.push(...batchResults);
-    } catch (err: any) {
-      logger.error(`[ArcRift] Batch embedding failed at index ${i}: ${err.message}`);
-      throw err;
-    }
-    
-    // Tiny rest to let CPU breathe
-    if (i + BATCH_SIZE < texts.length) {
-      await new Promise(r => setTimeout(r, 500));
-    }
+  for (let i = 0; i < texts.length; i += 3) {
+    const batch = texts.slice(i, i + 3);
+    const batchResults = await Promise.all(batch.map(t => generateEmbedding(t, task)));
+    results.push(...batchResults);
+    if (i + 3 < texts.length) await new Promise(r => setTimeout(r, 500));
   }
-  
   return results;
 }
 
@@ -91,4 +46,3 @@ export async function checkOllamaHealth(): Promise<boolean> {
     return false;
   }
 }
-
