@@ -11,6 +11,10 @@ const execFileAsync = promisify(execFile);
 export const MIMO_MODEL = "xiaomi/mimo-v2.6-pro";
 export const LUNA_MODEL = "openai-codex/gpt-6-luna";
 export const SOL_MODEL = "openai-codex/gpt-6-sol";
+export const MIMO_MAX_TOKENS = 512;
+export const MIMO_MAX_INPUT_BYTES = 40_000;
+export const MIMO_ATTEMPT_RESERVATION_USD = 0.05;
+export const MIMO_WORST_CASE_USD = (MIMO_MAX_INPUT_BYTES * 0.5 + MIMO_MAX_TOKENS * 1) / 1_000_000;
 
 export type HttpPost = (url: string, body: any, config: any) => Promise<{ data: any }>;
 export type PiExecutor = (model: string, promptPath: string, timeoutMs: number) => Promise<string>;
@@ -64,25 +68,32 @@ export class MemoryProviders {
 
   async callMimo(prompt: string): Promise<{ value: any; cost: number; requestHash: string }> {
     if (!this.openRouterKey) throw new Error("An OpenRouter key is required for MiMo");
-    if (this.budget && !this.budget.canStart(0.02)) throw new Error("budget_hold");
+    if (Buffer.byteLength(prompt, "utf8") > MIMO_MAX_INPUT_BYTES) throw new Error("MiMo prompt exceeds the budgeted input limit");
     let lastError: unknown;
     for (let attempt = 0; attempt <= this.retries; attempt++) {
+      const reservationId = crypto.randomUUID();
+      if (this.budget && !this.budget.reserve(reservationId, "openrouter", MIMO_MODEL, MIMO_ATTEMPT_RESERVATION_USD)) throw new Error("budget_hold");
       try {
         const response = await this.httpPost("https://openrouter.ai/api/v1/chat/completions", {
           model: MIMO_MODEL,
           messages: [{ role: "user", content: prompt }],
           reasoning: { effort: "low" },
           response_format: { type: "json_object" },
+          max_tokens: MIMO_MAX_TOKENS,
+          provider: { allow_fallbacks: false, max_price: { prompt: 0.5, completion: 1 } },
         }, { headers: { Authorization: `Bearer ${this.openRouterKey}`, "Content-Type": "application/json" }, timeout: 60_000 });
         const content = response.data?.choices?.[0]?.message?.content;
+        const reportedCost = response.data?.usage?.cost ?? response.data?.usage?.cost_details?.upstream_inference_cost;
+        const cost = Number(reportedCost);
+        if (reportedCost == null) throw new Error("Missing provider cost");
+        if (!Number.isFinite(cost) || cost < 0) throw new Error("Invalid provider cost");
+        const requestHash = crypto.createHash("sha256").update(`${reservationId}\0${prompt}\0${String(content)}\0${attempt}`).digest("hex");
+        this.budget?.settle(reservationId, cost, requestHash);
         if (typeof content !== "string") throw new Error("Invalid provider JSON: missing message content");
         const value = parseJson(content);
-        const cost = Number(response.data?.usage?.cost ?? response.data?.usage?.cost_details?.upstream_inference_cost ?? 0);
-        if (!Number.isFinite(cost) || cost < 0) throw new Error("Invalid provider cost");
-        const requestHash = crypto.createHash("sha256").update(`${prompt}\0${content}`).digest("hex");
-        this.budget?.record("openrouter", MIMO_MODEL, cost, requestHash);
         return { value, cost, requestHash };
       } catch (error) {
+        this.budget?.forfeit(reservationId);
         lastError = error;
       }
     }

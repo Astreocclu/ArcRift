@@ -14,9 +14,9 @@ import {
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
 
-dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
-dotenv.config({ path: path.resolve(__dirname, "../../.env") });
-dotenv.config({ path: path.resolve(__dirname, "../../../../backend/.env") });
+dotenv.config({ path: path.resolve(__dirname, "../../../.env"), quiet: true });
+dotenv.config({ path: path.resolve(__dirname, "../../.env"), quiet: true });
+dotenv.config({ path: path.resolve(__dirname, "../../../../backend/.env"), quiet: true });
 
 import { recall } from "./tools/recall";
 import { store } from "./tools/store";
@@ -105,13 +105,10 @@ export async function createMemoryMcpHttpHandler(options: { token: string; memor
   };
 }
 
-async function main() {
-  process.env.ARCRIFT_MCP_MODE = "true";
+export async function runStdioServer() {
   await initStorage();
   startWorker().catch(error => logger.error("Failed to start job worker:", error));
   const server = createArcRiftMcpServer();
   await server.connect(new StdioServerTransport());
   logger.info("ArcRift MCP Server running on stdio");
 }
-
-if (require.main === module) main().catch(error => { process.stderr.write(`[ArcRift MCP] Fatal: ${error}\n`); process.exit(1); });

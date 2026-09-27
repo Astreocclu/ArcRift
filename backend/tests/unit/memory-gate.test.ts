@@ -3,6 +3,8 @@ import os from "os";
 import path from "path";
 import { initSqlite, getSqlite } from "../../src/services/sqlite";
 import { MemoryGateService } from "../../src/services/memory-gate";
+import { parseGateMode } from "../../src/services/memory-gate";
+import { MemoryRecordRepository } from "../../src/services/memory-records";
 
 describe("curated memory write gate", () => {
   let root: string;
@@ -76,5 +78,91 @@ describe("curated memory write gate", () => {
     expect(providers.callSol).not.toHaveBeenCalled();
     expect((getSqlite().prepare("SELECT count(*) AS n FROM memory_records").get() as any).n).toBe(0);
     expect((getSqlite().prepare("SELECT count(*) AS n FROM memory_proposals").get() as any).n).toBe(1);
+  });
+
+  it("fails invalid write modes closed", () => {
+    expect(parseGateMode("active")).toBe("active");
+    expect(parseGateMode("shadow")).toBe("shadow");
+    expect(parseGateMode("typo-active")).toBe("off");
+    expect(parseGateMode(undefined)).toBe("off");
+  });
+
+  it("coalesces overlapping idempotent proposals", async () => {
+    let release!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    const providers = {
+      callMimo: jest.fn(async () => { await blocked; return { value: keeper, cost: 0, requestHash: "m" }; }),
+      callLuna: jest.fn(async () => keeper),
+      callSol: jest.fn(async () => keeper),
+    };
+    const first = new MemoryGateService({ db: getSqlite(), providers, mode: "shadow" }).propose({ content: "decision", source: "a0", idempotencyKey: "overlap" });
+    const second = new MemoryGateService({ db: getSqlite(), providers, mode: "shadow" }).propose({ content: "decision", source: "a0", idempotencyKey: "overlap" });
+    release();
+    expect(await second).toEqual(await first);
+    expect(providers.callMimo).toHaveBeenCalledTimes(1);
+    expect((getSqlite().prepare("SELECT count(*) AS n FROM memory_proposals").get() as any).n).toBe(1);
+  });
+
+  it("requires two supersession votes and validates gate output", async () => {
+    const { gate, providers } = service();
+    await expect(gate.propose({ content: "decision", source: "a0", idempotencyKey: "strict" })).resolves.toMatchObject({ status: "accepted" });
+    providers.callMimo.mockResolvedValueOnce({ value: { ...keeper, confidence: 2 }, cost: 0, requestHash: "bad" });
+    await expect(gate.propose({ content: "bad", source: "a0", idempotencyKey: "invalid-schema" })).resolves.toMatchObject({ status: "quarantined" });
+  });
+
+  it("uses two supersession votes and Sol as the tiebreak", async () => {
+    const repository = new MemoryRecordRepository(getSqlite());
+    repository.upsertSource({ uid: "old-source", source: "fixture", text: "old source" });
+    repository.insertRecord({ rid: "old", uid: "old-source", source: "fixture", kind: "decision", scope: "global", subject_key: "git.rule", text: "Old rule", status: "current" });
+    repository.upsertEmbedding("old", new Array(1024).fill(0.1));
+    const providers = {
+      callMimo: jest.fn()
+        .mockResolvedValueOnce({ value: keeper, cost: 0, requestHash: "triage" })
+        .mockResolvedValueOnce({ value: { decision: "newer" }, cost: 0, requestHash: "pair" }),
+      callLuna: jest.fn()
+        .mockResolvedValueOnce(keeper)
+        .mockResolvedValueOnce({ decision: "older" }),
+      callSol: jest.fn().mockResolvedValue({ decision: "conflict" }),
+    };
+    const gate = new MemoryGateService({ db: getSqlite(), providers, mode: "active", embed: async () => new Array(1024).fill(0.2) });
+    expect((await gate.propose({ content: "new", source: "a0", idempotencyKey: "vote" })).status).toBe("accepted");
+    expect(providers.callSol).toHaveBeenCalledTimes(1);
+    expect((getSqlite().prepare("SELECT status FROM memory_records WHERE rid LIKE 'proposal:%#0'").get() as any).status).toBe("disputed");
+  });
+
+  it("does not partially write an active multi-record proposal", async () => {
+    const multi = { ...keeper, records: [keeper.records[0], { subject_key: "other", text: "Second record" }] };
+    const providers = { callMimo: async () => ({ value: multi, cost: 0, requestHash: "m" }), callLuna: async () => multi, callSol: async () => multi };
+    let calls = 0;
+    const gate = new MemoryGateService({
+      db: getSqlite(), providers, mode: "active",
+      embed: async () => { calls += 1; if (calls === 2) throw new Error("embedding failed"); return new Array(1024).fill(0.1); },
+    });
+    expect((await gate.propose({ content: "multi", source: "a0", idempotencyKey: "atomic" })).status).toBe("quarantined");
+    expect((getSqlite().prepare("SELECT count(*) AS n FROM memory_sources WHERE uid LIKE 'proposal:%'").get() as any).n).toBe(0);
+    expect((getSqlite().prepare("SELECT count(*) AS n FROM memory_records").get() as any).n).toBe(0);
+  });
+
+  it("plans later records against earlier records in the same active proposal", async () => {
+    const multi = { ...keeper, records: [
+      { subject_key: "shared", text: "First rule" },
+      { subject_key: "shared", text: "New rule" },
+    ] };
+    const providers = {
+      callMimo: jest.fn()
+        .mockResolvedValueOnce({ value: multi, cost: 0, requestHash: "triage" })
+        .mockResolvedValueOnce({ value: { decision: "newer" }, cost: 0, requestHash: "pair" }),
+      callLuna: jest.fn()
+        .mockResolvedValueOnce(multi)
+        .mockResolvedValueOnce({ decision: "newer" }),
+      callSol: jest.fn(),
+    };
+    const gate = new MemoryGateService({ db: getSqlite(), providers, mode: "active", embed: async text => new Array(1024).fill(text.startsWith("First") ? 0.1 : 0.2) });
+    const result = await gate.propose({ content: "two versions", source: "a0", idempotencyKey: "staged" });
+    expect(result.status).toBe("accepted");
+    const rows = getSqlite().prepare("SELECT rid,status,superseded_by FROM memory_records ORDER BY rid").all() as any[];
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ status: "superseded", superseded_by: rows[1].rid });
+    expect(rows[1].status).toBe("current");
   });
 });

@@ -90,6 +90,14 @@ export function importMemoryV5(options: { db: Database.Database; paths: MemoryV5
   if (embeddings.length !== records.length) throw new Error(`Embedding count ${embeddings.length} does not match record count ${records.length}`);
   const dimensionErrors = embeddings.filter(vector => !Array.isArray(vector) || vector.length !== 1024 || vector.some(value => !Number.isFinite(value))).length;
   if (dimensionErrors > 0) throw new Error(`Embedding dimension errors: ${dimensionErrors}`);
+  const pairDecisions = new Set(["same", "newer", "older", "conflict", "unrelated"]);
+  for (const pair of pairs) {
+    assertString(pair.old, "pair old rid");
+    assertString(pair.new, "pair new rid");
+    assertString(pair.final, "pair final decision");
+    if (!recordIds.has(pair.old) || !recordIds.has(pair.new)) throw new Error(`Pair references a missing record: ${pair.old} -> ${pair.new}`);
+    if (!pairDecisions.has(pair.final)) throw new Error(`Invalid pair final decision: ${pair.final}`);
+  }
 
   const labels = new Map<string, any>();
   for (const labelPath of paths.gateLabels) {
@@ -114,19 +122,16 @@ export function importMemoryV5(options: { db: Database.Database; paths: MemoryV5
     for (const uid of quarantine) repository.addQuarantine(uid, "cleanroom-v5-drop", "gate-v2");
     for (const [uid, value] of ledger) repository.addLedger(uid, "receipt", value);
     for (const pair of pairs) {
-      assertString(pair.old, "pair old rid");
-      assertString(pair.new, "pair new rid");
-      assertString(pair.final, "pair final decision");
       const pairId = sha256(`${pair.old}\0${pair.new}`);
       repository.addSupersessionPair({
         pair_id: pairId,
-        old_rid: pair.old,
-        new_rid: pair.new,
+        old_rid: pair.old as string,
+        new_rid: pair.new as string,
         similarity: typeof pair.sim === "number" ? pair.sim : null,
         mimo: typeof pair.mimo === "string" ? pair.mimo : null,
         luna: typeof pair.luna === "string" ? pair.luna : null,
         sol: typeof pair.sol === "string" ? pair.sol : null,
-        final: pair.final,
+        final: pair.final as string,
       });
     }
   });

@@ -274,6 +274,15 @@ function createTables() {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_memory_usage_date ON memory_usage(ct_date);
+    CREATE TABLE IF NOT EXISTS memory_budget_reservations (
+      reservation_id TEXT PRIMARY KEY,
+      ct_date TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      reserved_usd REAL NOT NULL CHECK(reserved_usd >= 0),
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_budget_reservations_date ON memory_budget_reservations(ct_date);
     CREATE TABLE IF NOT EXISTS memory_usage_warnings (
       ct_date TEXT PRIMARY KEY,
       warned_at TEXT NOT NULL

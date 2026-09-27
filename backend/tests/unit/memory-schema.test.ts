@@ -50,6 +50,9 @@ describe("curated memory schema", () => {
     repository.addQuarantine("af:1", "drop", "fixture");
     repository.addQuarantine("af:1", "drop", "fixture");
     repository.addLedger("af:2", "receipt", { label: "receipt" });
+    repository.upsertSource({ uid: "pair-source", source: "fixture", text: "pair source" });
+    repository.insertRecord({ rid: "old", uid: "pair-source", source: "fixture", kind: "decision", scope: "global", text: "old", status: "disputed", conflicts_with: ["new"] });
+    repository.insertRecord({ rid: "new", uid: "pair-source", source: "fixture", kind: "decision", scope: "global", text: "new", status: "disputed", conflicts_with: ["old"] });
     repository.addSupersessionPair({ pair_id: "p1", old_rid: "old", new_rid: "new", similarity: 0.9, mimo: "conflict", luna: "conflict", sol: null, final: "conflict" });
     repository.decideConflict("p1", "keep_both", "tester", "fixture");
     expect((getSqlite().prepare("SELECT count(*) AS n FROM memory_quarantine").get() as any).n).toBe(1);

@@ -73,6 +73,6 @@ describe("authenticated memory MCP HTTP transport", () => {
     const get = await fetch(baseUrl, { headers: { authorization: "Bearer test-bearer-token" } });
     expect(get.status).toBe(405);
     const oversized = await post({ jsonrpc: "2.0", id: 9, method: "x", params: { value: "x".repeat(270_000) } }, "test-bearer-token");
-    expect([413, 500]).toContain(oversized.status);
+    expect(oversized.status).toBe(413);
   });
 });

@@ -5,9 +5,16 @@ import { MemoryRecord } from "./storage.types";
 
 export type SupersessionDecision = "same" | "newer" | "older" | "conflict" | "unrelated";
 export type SupersessionAdjudicator = (oldRecord: MemoryRecord, newRecord: MemoryRecord, similarity: number | null) => Promise<SupersessionDecision>;
+export interface SupersessionPlan { final: SupersessionDecision; pair_id?: string; matched_rid?: string; similarity?: number | null; model?: string }
+export interface StagedCandidate { record: MemoryRecord; embedding: number[]; plan: SupersessionPlan }
 
 const normalize = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim();
 const pairId = (oldRid: string, newRid: string) => crypto.createHash("sha256").update(`${oldRid}\0${newRid}`).digest("hex");
+const cosine = (a: number[], b: number[]) => {
+  let dot = 0, aa = 0, bb = 0;
+  for (let index = 0; index < a.length; index++) { dot += a[index] * b[index]; aa += a[index] ** 2; bb += b[index] ** 2; }
+  return aa && bb ? dot / Math.sqrt(aa * bb) : -1;
+};
 
 export class MemorySupersessionService {
   private readonly repository: MemoryRecordRepository;
@@ -16,16 +23,20 @@ export class MemorySupersessionService {
   }
 
   async applyCandidate(record: MemoryRecord, embedding: number[]): Promise<{ final: SupersessionDecision; pair_id?: string; matched_rid?: string }> {
-    const live = this.db.prepare("SELECT * FROM memory_records WHERE status IN ('current','disputed') ORDER BY rid").all() as any[];
+    const plan = await this.planCandidate(record, embedding);
+    this.repository.transaction(() => this.applyPlan(record, embedding, plan));
+    return { final: plan.final, pair_id: plan.pair_id, matched_rid: plan.matched_rid };
+  }
+
+  async planCandidate(record: MemoryRecord, embedding: number[], staged: StagedCandidate[] = []): Promise<SupersessionPlan> {
+    const stagedLive = staged
+      .filter(item => !["same", "older"].includes(item.plan.final))
+      .map(item => ({ ...item.record, conflicts_with: item.plan.final === "conflict" ? [item.plan.matched_rid!] : [] }));
+    const live = [...(this.db.prepare("SELECT * FROM memory_records WHERE status IN ('current','disputed') ORDER BY rid").all() as any[]), ...stagedLive];
     const exact = live.find(row => normalize(row.text) === normalize(record.text));
     if (exact) {
       const id = pairId(exact.rid, record.rid);
-      this.repository.transaction(() => {
-        this.repository.insertRecord({ ...record, status: "duplicate", dup_of: exact.rid });
-        this.repository.upsertEmbedding(record.rid, embedding);
-        this.repository.addSupersessionPair({ pair_id: id, old_rid: exact.rid, new_rid: record.rid, similarity: 1, mimo: "deterministic_exact", luna: null, sol: null, final: "same" });
-      });
-      return { final: "same", pair_id: id, matched_rid: exact.rid };
+      return { final: "same", pair_id: id, matched_rid: exact.rid, similarity: 1, model: "deterministic_exact" };
     }
 
     let candidate: any | undefined;
@@ -39,32 +50,45 @@ export class MemorySupersessionService {
         candidate = live.find(row => row.rid === eligible.record_id);
         similarity = eligible.similarity;
       }
+      const stagedEligible = staged
+        .filter(item => !["same", "older"].includes(item.plan.final))
+        .map(item => ({ item, similarity: cosine(item.embedding, embedding) }))
+        .filter(item => item.similarity >= 0.75)
+        .sort((a, b) => b.similarity - a.similarity)[0];
+      if (stagedEligible && (similarity === null || stagedEligible.similarity > similarity)) {
+        candidate = stagedEligible.item.record;
+        similarity = stagedEligible.similarity;
+      }
     }
 
     if (!candidate) {
-      this.repository.transaction(() => { this.repository.insertRecord(record); this.repository.upsertEmbedding(record.rid, embedding); });
       return { final: "unrelated" };
     }
     if (similarity === null && embedding.length === 1024) similarity = null;
     const oldRecord = this.toRecord(candidate);
     const final = await this.adjudicate(oldRecord, record, similarity);
     const id = pairId(oldRecord.rid, record.rid);
-    this.repository.transaction(() => {
-      this.repository.insertRecord(record);
-      this.repository.upsertEmbedding(record.rid, embedding);
-      if (final === "same") this.db.prepare("UPDATE memory_records SET status='duplicate', dup_of=? WHERE rid=?").run(oldRecord.rid, record.rid);
-      if (final === "newer") this.db.prepare("UPDATE memory_records SET status='superseded', superseded_by=? WHERE rid=?").run(record.rid, oldRecord.rid);
-      if (final === "older") this.db.prepare("UPDATE memory_records SET status='superseded', superseded_by=? WHERE rid=?").run(oldRecord.rid, record.rid);
-      if (final === "conflict") {
-        this.db.prepare("UPDATE memory_records SET status='disputed', conflicts_with=? WHERE rid=?").run(JSON.stringify([record.rid]), oldRecord.rid);
-        this.db.prepare("UPDATE memory_records SET status='disputed', conflicts_with=? WHERE rid=?").run(JSON.stringify([oldRecord.rid]), record.rid);
-      }
-      this.repository.addSupersessionPair({ pair_id: id, old_rid: oldRecord.rid, new_rid: record.rid, similarity, mimo: "model", luna: null, sol: null, final });
-    });
-    return { final, pair_id: id, matched_rid: oldRecord.rid };
+    return { final, pair_id: id, matched_rid: oldRecord.rid, similarity, model: "model" };
+  }
+
+  applyPlan(record: MemoryRecord, embedding: number[], plan: SupersessionPlan): void {
+    const stored = { ...record };
+    if (plan.final === "same") { stored.status = "duplicate"; stored.dup_of = plan.matched_rid; }
+    if (plan.final === "older") { stored.status = "superseded"; stored.superseded_by = plan.matched_rid; }
+    if (plan.final === "conflict") { stored.status = "disputed"; stored.conflicts_with = [plan.matched_rid!]; }
+    this.repository.insertRecord(stored);
+    this.repository.upsertEmbedding(record.rid, embedding);
+    if (plan.final === "newer") this.db.prepare("UPDATE memory_records SET status='superseded', superseded_by=? WHERE rid=?").run(record.rid, plan.matched_rid);
+    if (plan.final === "conflict") this.db.prepare("UPDATE memory_records SET status='disputed', conflicts_with=? WHERE rid=?").run(JSON.stringify([record.rid]), plan.matched_rid);
+    if (plan.pair_id && plan.matched_rid) {
+      this.repository.addSupersessionPair({
+        pair_id: plan.pair_id, old_rid: plan.matched_rid, new_rid: record.rid,
+        similarity: plan.similarity ?? null, mimo: plan.model ?? "model", luna: null, sol: null, final: plan.final,
+      });
+    }
   }
 
   private toRecord(row: any): MemoryRecord {
-    return { ...row, conflicts_with: JSON.parse(row.conflicts_with || "[]") };
+    return { ...row, conflicts_with: Array.isArray(row.conflicts_with) ? row.conflicts_with : JSON.parse(row.conflicts_with || "[]") };
   }
 }

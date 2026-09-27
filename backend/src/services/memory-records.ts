@@ -127,12 +127,52 @@ export class MemoryRecordRepository {
   }
 
   decideConflict(pairId: string, decision: "keep_old" | "keep_new" | "keep_both" | "same", decidedBy: string, note?: string) {
-    this.db.prepare(`
-      INSERT INTO memory_conflict_decisions(pair_id, decision, decided_by, note, decided_at)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(pair_id) DO UPDATE SET
-        decision=excluded.decision, decided_by=excluded.decided_by,
-        note=excluded.note, decided_at=excluded.decided_at
-    `).run(pairId, decision, decidedBy, note ?? null, new Date().toISOString());
+    this.transaction(() => {
+      const pair = this.db.prepare(`
+        SELECT p.old_rid, p.new_rid
+        FROM memory_supersession_pairs p
+        LEFT JOIN memory_conflict_decisions d ON d.pair_id=p.pair_id
+        WHERE p.pair_id=? AND p.final='conflict' AND d.pair_id IS NULL
+      `).get(pairId) as { old_rid: string; new_rid: string } | undefined;
+      if (!pair) throw new Error("Conflict pair does not exist or is already resolved");
+      this.db.prepare(`
+        INSERT INTO memory_conflict_decisions(pair_id, decision, decided_by, note, decided_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(pairId, decision, decidedBy, note ?? null, new Date().toISOString());
+
+      const refresh = (rid: string) => {
+        const remaining = this.db.prepare(`
+          SELECT CASE WHEN p.old_rid=? THEN p.new_rid ELSE p.old_rid END AS peer
+          FROM memory_supersession_pairs p
+          LEFT JOIN memory_conflict_decisions d ON d.pair_id=p.pair_id
+          WHERE p.final='conflict' AND d.pair_id IS NULL AND (p.old_rid=? OR p.new_rid=?)
+          ORDER BY peer
+        `).all(rid, rid, rid) as Array<{ peer: string }>;
+        if (remaining.length > 0) {
+          const updated = this.db.prepare("UPDATE memory_records SET status='disputed',dup_of=NULL,superseded_by=NULL,conflicts_with=? WHERE rid=?")
+            .run(JSON.stringify(remaining.map(row => row.peer)), rid);
+          if (updated.changes !== 1) throw new Error(`Conflict record is missing: ${rid}`);
+          return;
+        }
+        const loss = this.db.prepare(`
+          SELECT p.old_rid,p.new_rid,d.decision
+          FROM memory_conflict_decisions d
+          JOIN memory_supersession_pairs p ON p.pair_id=d.pair_id
+          WHERE (p.old_rid=? OR p.new_rid=?) AND (
+            (d.decision IN ('keep_old','same') AND p.new_rid=?) OR
+            (d.decision='keep_new' AND p.old_rid=?)
+          )
+          ORDER BY d.decided_at DESC,p.pair_id DESC LIMIT 1
+        `).get(rid, rid, rid, rid) as { old_rid: string; new_rid: string; decision: string } | undefined;
+        const status = loss?.decision === "same" ? "duplicate" : loss ? "superseded" : "current";
+        const dupOf = loss?.decision === "same" ? loss.old_rid : null;
+        const supersededBy = loss && loss.decision !== "same" ? (loss.old_rid === rid ? loss.new_rid : loss.old_rid) : null;
+        const updated = this.db.prepare("UPDATE memory_records SET status=?,dup_of=?,superseded_by=?,conflicts_with='[]' WHERE rid=?")
+          .run(status, dupOf, supersededBy, rid);
+        if (updated.changes !== 1) throw new Error(`Conflict record is missing: ${rid}`);
+      };
+      refresh(pair.old_rid);
+      refresh(pair.new_rid);
+    });
   }
 }

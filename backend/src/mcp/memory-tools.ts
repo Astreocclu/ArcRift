@@ -15,6 +15,7 @@ export const MEMORY_TOOLS = [
 export const handleMemoryTool: MemoryToolHandler = async (name, args) => {
   if (name === "memory_search") {
     if (typeof args.query !== "string" || !args.query.trim()) throw new Error("query is required");
+    if (args.query.length > 4_000) throw new Error("query exceeds 4000 characters");
     return (await new MemorySearchService().search(args.query, { topN: typeof args.topN === "number" ? args.topN : undefined })).text;
   }
   if (name === "memory_conflicts") {
@@ -38,8 +39,11 @@ export const handleMemoryTool: MemoryToolHandler = async (name, args) => {
   }
   if (name === "memory_propose") {
     if (typeof args.content !== "string" || typeof args.source !== "string" || typeof args.idempotencyKey !== "string") throw new Error("content, source, and idempotencyKey are required");
-    if ((process.env.ARCRIFT_MEMORY_WRITE_MODE ?? "off") === "off") return JSON.stringify({ status: "off" });
-    const { MemoryGateService } = require("../services/memory-gate") as { MemoryGateService: new () => { propose(input: any): Promise<unknown> } };
+    const { MemoryGateService, parseGateMode } = require("../services/memory-gate") as {
+      MemoryGateService: new () => { propose(input: any): Promise<unknown> };
+      parseGateMode(value: string | undefined): "off" | "shadow" | "active";
+    };
+    if (parseGateMode(process.env.ARCRIFT_MEMORY_WRITE_MODE) === "off") return JSON.stringify({ status: "off" });
     return JSON.stringify(await new MemoryGateService().propose({ content: args.content, source: args.source, idempotencyKey: args.idempotencyKey, contentHash: crypto.createHash("sha256").update(args.content).digest("hex") }));
   }
   throw new Error(`Unknown memory tool: ${name}`);

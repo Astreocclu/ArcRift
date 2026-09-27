@@ -42,4 +42,30 @@ describe("memory supersession", () => {
     expect((getSqlite().prepare("SELECT status FROM memory_records WHERE rid='third'").get() as any).status).toBe("disputed");
     expect((getSqlite().prepare("SELECT count(*) AS n FROM memory_supersession_pairs WHERE final='conflict'").get() as any).n).toBe(1);
   });
+
+  it("applies conflict decisions to record retrieval state atomically", async () => {
+    const conflict = new MemorySupersessionService(getSqlite(), async () => "conflict");
+    const result = await conflict.applyCandidate(candidate("Contradictory rule"), new Array(1024).fill(0.12));
+    expect(result.pair_id).toBeTruthy();
+    repository.decideConflict(result.pair_id!, "keep_old", "reviewer");
+    expect((getSqlite().prepare("SELECT status FROM memory_records WHERE rid='old'").get() as any).status).toBe("current");
+    expect((getSqlite().prepare("SELECT status, superseded_by FROM memory_records WHERE rid='new'").get() as any)).toMatchObject({ status: "superseded", superseded_by: "old" });
+    expect(() => repository.decideConflict(result.pair_id!, "keep_new", "reviewer")).toThrow(/already resolved/);
+  });
+
+  it("preserves a record's other unresolved conflicts", async () => {
+    const conflict = new MemorySupersessionService(getSqlite(), async () => "conflict");
+    const first = await conflict.applyCandidate(candidate("First contradiction"), new Array(1024).fill(0.12));
+    repository.upsertSource({ uid: "third-source", source: "fixture", text: "third" });
+    repository.insertRecord({ ...candidate("Second contradiction"), rid: "third", uid: "third-source", status: "disputed", conflicts_with: ["old"] });
+    repository.upsertEmbedding("third", new Array(1024).fill(0.13));
+    getSqlite().prepare("UPDATE memory_records SET conflicts_with=? WHERE rid='old'").run(JSON.stringify(["new", "third"]));
+    repository.addSupersessionPair({ pair_id: "old-third", old_rid: "old", new_rid: "third", similarity: null, mimo: "model", luna: null, sol: null, final: "conflict" });
+    repository.decideConflict(first.pair_id!, "keep_old", "reviewer");
+    const old = getSqlite().prepare("SELECT status, conflicts_with FROM memory_records WHERE rid='old'").get() as any;
+    expect(old.status).toBe("disputed");
+    expect(JSON.parse(old.conflicts_with)).toContain("third");
+    repository.decideConflict("old-third", "keep_old", "reviewer");
+    expect((getSqlite().prepare("SELECT status, conflicts_with FROM memory_records WHERE rid='old'").get() as any)).toMatchObject({ status: "current", conflicts_with: "[]" });
+  });
 });

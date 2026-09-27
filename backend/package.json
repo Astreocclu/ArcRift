@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && npx esbuild src/index.ts --bundle --platform=node --packages=external --outdir=dist && npx esbuild scripts/*.ts --bundle --platform=node --packages=external --outdir=dist/scripts && npx esbuild src/scripts/*.ts --bundle --platform=node --packages=external --outdir=dist/scripts",
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && npx esbuild src/index.ts --bundle --platform=node --packages=external --outdir=dist && npx esbuild src/mcp/stdio.ts --bundle --platform=node --packages=external --outfile=dist/mcp-stdio.js && npx esbuild scripts/*.ts --bundle --platform=node --packages=external --outdir=dist/scripts && npx esbuild src/scripts/*.ts --bundle --platform=node --packages=external --outdir=dist/scripts",
     "start": "node dist/index.js",
     "test": "jest --config jest.config.json",
     "test:unit": "jest --config jest.config.json tests/unit",

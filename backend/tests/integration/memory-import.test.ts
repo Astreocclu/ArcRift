@@ -52,4 +52,10 @@ describe("v5 curated memory importer", () => {
     expect(() => importMemoryV5({ db: getSqlite(), paths })).toThrow(/missing link target/i);
     expect((getSqlite().prepare("SELECT count(*) AS n FROM memory_records").get() as any).n).toBe(0);
   });
+
+  it("rejects invalid pair references before starting the transaction", () => {
+    fs.writeFileSync(paths.pairs, JSON.stringify([{ old: "old", new: "missing", final: "newer" }]));
+    expect(() => importMemoryV5({ db: getSqlite(), paths })).toThrow(/pair references a missing record/i);
+    expect((getSqlite().prepare("SELECT count(*) AS n FROM memory_records").get() as any).n).toBe(0);
+  });
 });

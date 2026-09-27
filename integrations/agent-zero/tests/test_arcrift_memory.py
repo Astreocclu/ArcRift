@@ -163,6 +163,16 @@ def test_digest_test_entrypoint_sends_at_most_once_and_caps_items(tmp_path, monk
     assert len(calls) == 1
 
 
+def test_digest_claim_allows_only_one_overlapping_sender(tmp_path):
+    state_path = tmp_path / "state.json"
+    first = digest.claim_delivery(False, "2026-09-27T08:00", state_path=state_path)
+    second = digest.claim_delivery(False, "2026-09-27T08:00", state_path=state_path)
+    assert first
+    assert second is None
+    digest.release_claim(first, state_path=state_path)
+    assert digest.claim_delivery(False, "2026-09-27T08:00", state_path=state_path)
+
+
 def test_execute_entrypoint_adds_a0_root_before_plugin_import():
     source = (PLUGIN / "execute.py").read_text(encoding="utf-8")
     assert "Path(__file__).resolve().parents[3]" in source
