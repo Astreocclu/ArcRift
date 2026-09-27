@@ -63,4 +63,18 @@ describe("curated memory write gate", () => {
     expect((await gate.propose({ content: "decision", source: "a0", idempotencyKey: "shadow" })).status).toBe("shadow");
     expect((getSqlite().prepare("SELECT count(*) AS n FROM memory_records").get() as any).n).toBe(0);
   });
+
+  it("records a non-writing shadow result when the second opinion is unavailable", async () => {
+    const providers = {
+      callMimo: jest.fn(async () => ({ value: keeper, cost: 0, requestHash: "m" })),
+      callLuna: jest.fn(async () => { throw new Error("Pi provider timed out"); }),
+      callSol: jest.fn(async () => keeper),
+    };
+    const gate = new MemoryGateService({ db: getSqlite(), providers: providers as any, prefilter: new Set(), mode: "shadow" });
+    const result = await gate.propose({ content: "decision", source: "agent-zero", idempotencyKey: "shadow-timeout" });
+    expect(result).toEqual({ status: "shadow", label: "decision", reason: "second_opinion_unavailable:Pi provider timed out" });
+    expect(providers.callSol).not.toHaveBeenCalled();
+    expect((getSqlite().prepare("SELECT count(*) AS n FROM memory_records").get() as any).n).toBe(0);
+    expect((getSqlite().prepare("SELECT count(*) AS n FROM memory_proposals").get() as any).n).toBe(1);
+  });
 });

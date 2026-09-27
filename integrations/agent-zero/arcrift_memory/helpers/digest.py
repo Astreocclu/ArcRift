@@ -104,7 +104,13 @@ async def deliver_digest(
     return True
 
 
-async def send_digest(*, test: bool = False, max_items: int | None = None, now: datetime | None = None) -> bool:
+async def send_digest(
+    *,
+    test: bool = False,
+    max_items: int | None = None,
+    now: datetime | None = None,
+    state_path: Path = STATE_PATH,
+) -> bool:
     from helpers import plugins
     from plugins._email_integration.helpers.smtp_client import send_reply
 
@@ -114,7 +120,7 @@ async def send_digest(*, test: bool = False, max_items: int | None = None, now: 
     hours = list(config.get("digest_hours", [8, 18]))
     now = now or datetime.now(tz=ZoneInfo("UTC"))
     slot = current_slot(now, timezone, hours)
-    state = load_state()
+    state = load_state(state_path)
     if not test and (slot in state["delivered_slots"] or slot in state["checked_empty_slots"]):
         return False
     configured_limit = max(1, min(int(config.get("digest_max_conflicts", 10)), 10))
@@ -126,10 +132,24 @@ async def send_digest(*, test: bool = False, max_items: int | None = None, now: 
     if not conflicts:
         if not test:
             state["checked_empty_slots"][slot] = {"checked_at": now.isoformat()}
-            save_state(state)
+            save_state(state, state_path)
         return False
     handler = select_handler(email_config, str(config.get("digest_handler_name", "")))
-    return await deliver_digest(conflicts, handler, slot=slot, test=test, send=send_reply, now=now)
+    return await deliver_digest(
+        conflicts,
+        handler,
+        slot=slot,
+        test=test,
+        send=send_reply,
+        state_path=state_path,
+        now=now,
+    )
+
+
+async def send_test_digest_once(*, max_items: int = 2, state_path: Path = STATE_PATH) -> bool:
+    if load_state(state_path)["test_deliveries"]:
+        return False
+    return await send_digest(test=True, max_items=min(max_items, 2), state_path=state_path)
 
 
 async def run_digest_tick(now: datetime | None = None) -> bool:

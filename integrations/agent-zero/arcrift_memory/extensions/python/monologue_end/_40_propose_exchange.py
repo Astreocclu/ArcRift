@@ -1,7 +1,6 @@
-import asyncio
-
 from agent import LoopData
 from helpers import plugins
+from helpers.defer import DeferredTask, THREAD_BACKGROUND
 from helpers.extension import Extension
 from usr.plugins.arcrift_memory.helpers.client import call_memory_tool, latest_exchange, proposal_content, proposal_key
 
@@ -19,7 +18,8 @@ class ArcRiftProposeExchange(Extension):
         context_id = str(self.agent.context.id)
         key = proposal_key(context_id, exchange)
         timeout = float(config.get("proposal_timeout_seconds", 15))
-        asyncio.create_task(self._submit(exchange, key, timeout))
+        task = DeferredTask(thread_name=THREAD_BACKGROUND)
+        task.start_task(self._submit, exchange, key, timeout)
 
     async def _submit(self, exchange: dict[str, str], key: str, timeout: float):
         if not self.agent:

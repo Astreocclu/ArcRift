@@ -35,4 +35,18 @@ describe("memory model providers", () => {
     await expect(providers.callMimo("x")).rejects.toThrow(/JSON/);
     await expect(providers.callLuna("x")).rejects.toThrow(/JSON/);
   });
+
+  it("bounds stalled Pi calls without retry amplification", async () => {
+    const invocations: string[] = [];
+    const providers = new MemoryProviders({
+      execPi: async model => {
+        invocations.push(model);
+        return await new Promise<string>(() => undefined);
+      },
+      piRetries: 0,
+      piTimeoutMs: 10,
+    });
+    await expect(providers.callLuna("x")).rejects.toThrow(/timed out/);
+    expect(invocations).toEqual(["openai-codex/gpt-6-luna"]);
+  });
 });

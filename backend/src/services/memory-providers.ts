@@ -13,7 +13,7 @@ export const LUNA_MODEL = "openai-codex/gpt-6-luna";
 export const SOL_MODEL = "openai-codex/gpt-6-sol";
 
 export type HttpPost = (url: string, body: any, config: any) => Promise<{ data: any }>;
-export type PiExecutor = (model: string, promptPath: string) => Promise<string>;
+export type PiExecutor = (model: string, promptPath: string, timeoutMs: number) => Promise<string>;
 
 function parseJson(text: string): any {
   const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
@@ -26,12 +26,12 @@ function parseJson(text: string): any {
   }
 }
 
-async function defaultExecPi(model: string, promptPath: string): Promise<string> {
+async function defaultExecPi(model: string, promptPath: string, timeoutMs: number): Promise<string> {
   const result = await execFileAsync("/home/astre/bin/pi", [
     "--print", "--no-session", "--no-tools", "--no-context-files", "--no-extensions",
     "--no-skills", "--no-prompt-templates", "--model", model, "--thinking", "high",
     `@${promptPath}`, "Return only one JSON object matching the requested schema.",
-  ], { maxBuffer: 4 * 1024 * 1024 });
+  ], { maxBuffer: 4 * 1024 * 1024, timeout: timeoutMs, killSignal: "SIGKILL" });
   return result.stdout;
 }
 
@@ -40,6 +40,8 @@ export class MemoryProviders {
   private readonly httpPost: HttpPost;
   private readonly execPi: PiExecutor;
   private readonly retries: number;
+  private readonly piRetries: number;
+  private readonly piTimeoutMs: number;
   private readonly budget?: MemoryBudget;
 
   constructor(options: {
@@ -47,12 +49,16 @@ export class MemoryProviders {
     httpPost?: HttpPost;
     execPi?: PiExecutor;
     retries?: number;
+    piRetries?: number;
+    piTimeoutMs?: number;
     budget?: MemoryBudget;
   } = {}) {
     this.openRouterKey = options.openRouterKey ?? process.env.ARCRIFT_OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY;
     this.httpPost = options.httpPost ?? ((url, body, config) => axios.post(url, body, config));
     this.execPi = options.execPi ?? defaultExecPi;
     this.retries = options.retries ?? 2;
+    this.piRetries = options.piRetries ?? 0;
+    this.piTimeoutMs = options.piTimeoutMs ?? 12_000;
     this.budget = options.budget;
   }
 
@@ -92,8 +98,18 @@ export class MemoryProviders {
     fs.writeFileSync(promptPath, prompt, { mode: 0o600 });
     try {
       let lastError: unknown;
-      for (let attempt = 0; attempt <= this.retries; attempt++) {
-        try { return parseJson(await this.execPi(model, promptPath)); }
+      for (let attempt = 0; attempt <= this.piRetries; attempt++) {
+        try {
+          let timer: NodeJS.Timeout | undefined;
+          const timeout = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`Pi provider timed out after ${this.piTimeoutMs}ms`)), this.piTimeoutMs);
+          });
+          try {
+            return parseJson(await Promise.race([this.execPi(model, promptPath, this.piTimeoutMs), timeout]));
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+        }
         catch (error) { lastError = error; }
       }
       throw lastError;

@@ -49,18 +49,34 @@ export class MemoryGateService {
       if (this.prefilter.has(input.fact.relation)) return this.quarantine(input, inputHash, "relation_prefilter");
     }
 
-    let decision: GateDecision;
+    let mimo: GateDecision;
     try {
       const prompt = this.triagePrompt(input);
-      const mimo = this.validateDecision((await this.providers.callMimo(prompt)).value);
-      if (input.source === "arcrift-fact") decision = mimo;
-      else {
-        const luna = this.validateDecision(await this.providers.callLuna(prompt));
-        decision = this.sameDecision(mimo, luna) ? mimo : this.validateDecision(await this.providers.callSol(prompt));
+      mimo = this.validateDecision((await this.providers.callMimo(prompt)).value);
+      if (input.source !== "arcrift-fact") {
+        let decision: GateDecision;
+        try {
+          const luna = this.validateDecision(await this.providers.callLuna(prompt));
+          decision = this.sameDecision(mimo, luna) ? mimo : this.validateDecision(await this.providers.callSol(prompt));
+        } catch (error) {
+          if (this.mode === "shadow") {
+            return this.save(input.idempotencyKey, inputHash, {
+              status: "shadow",
+              label: mimo.label,
+              reason: `second_opinion_unavailable:${error instanceof Error ? error.message : String(error)}`,
+            });
+          }
+          throw error;
+        }
+        return this.applyDecision(input, inputHash, decision);
       }
     } catch (error) {
       return this.quarantine(input, inputHash, `provider_failure:${error instanceof Error ? error.message : String(error)}`);
     }
+    return this.applyDecision(input, inputHash, mimo);
+  }
+
+  private async applyDecision(input: MemoryProposal, inputHash: string, decision: GateDecision): Promise<MemoryProposalResult> {
     if (decision.label === "receipt") {
       const uid = input.fact?.uid ?? `proposal:${hash(input.idempotencyKey)}`;
       this.repository.addLedger(uid, "receipt", { source: input.source, content_hash: input.contentHash ?? hash(input.content) });

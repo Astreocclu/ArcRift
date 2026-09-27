@@ -10,6 +10,8 @@ def _text(value: Any) -> str:
     if isinstance(value, list):
         return "\n".join(part for part in (_text(item) for item in value) if part)
     if isinstance(value, dict):
+        if "user_message" in value:
+            return _text(value["user_message"])
         if "raw_content" in value:
             return _text(value["raw_content"])
         return json.dumps(value, ensure_ascii=False, sort_keys=True)
@@ -20,7 +22,18 @@ def latest_exchange(messages: list[dict[str, Any]]) -> dict[str, str] | None:
     assistant_index = next((i for i in range(len(messages) - 1, -1, -1) if messages[i].get("ai") is True), None)
     if assistant_index is None:
         return None
-    user_index = next((i for i in range(assistant_index - 1, -1, -1) if messages[i].get("ai") is False), None)
+    user_index = next(
+        (
+            i
+            for i in range(assistant_index - 1, -1, -1)
+            if messages[i].get("ai") is False
+            and not (
+                isinstance(messages[i].get("content"), dict)
+                and ("tool_name" in messages[i]["content"] or "tool_result" in messages[i]["content"])
+            )
+        ),
+        None,
+    )
     if user_index is None:
         return None
     user = messages[user_index]

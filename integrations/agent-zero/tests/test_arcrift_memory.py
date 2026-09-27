@@ -14,6 +14,7 @@ PLUGIN = ROOT / "arcrift_memory"
 sys.path.insert(0, str(ROOT))
 
 from arcrift_memory.helpers.client import call_memory_tool, latest_exchange, proposal_key
+from arcrift_memory.helpers import digest
 from arcrift_memory.helpers.digest import current_slot, deliver_digest, load_state
 
 
@@ -34,6 +35,28 @@ def test_latest_exchange_has_stable_message_idempotency():
     assert exchange == {"user_id": "u1", "assistant_id": "a1", "user": "Please do this.", "assistant": "Done."}
     assert proposal_key("ctx", exchange) == proposal_key("ctx", exchange)
     assert proposal_key("other", exchange) != proposal_key("ctx", exchange)
+
+
+def test_latest_exchange_skips_mcp_results_and_extracts_a0_user_message():
+    messages = [
+        {"ai": False, "id": "u1", "content": {"user_message": "Find the routing decision."}},
+        {"ai": True, "id": "a-tool", "content": '{"tool_name":"arcrift_memory_search"}'},
+        {"ai": False, "id": "tool-result", "content": {"tool_name": "arcrift.memory_search", "tool_result": "large source text"}},
+        {"ai": True, "id": "a-final", "content": "The decision is current."},
+    ]
+    assert latest_exchange(messages) == {
+        "user_id": "u1",
+        "assistant_id": "a-final",
+        "user": "Find the routing decision.",
+        "assistant": "The decision is current.",
+    }
+
+
+def test_proposal_extension_uses_a0_background_task():
+    source = (PLUGIN / "extensions/python/monologue_end/_40_propose_exchange.py").read_text(encoding="utf-8")
+    assert "DeferredTask(thread_name=THREAD_BACKGROUND)" in source
+    assert "task.start_task(self._submit" in source
+    assert "asyncio.create_task" not in source
 
 
 def test_memory_tool_call_is_bounded_and_parses_json():
@@ -122,6 +145,30 @@ def test_digest_marks_only_after_smtp_success(tmp_path, monkeypatch):
 def test_digest_slots_are_ct_and_twice_daily():
     assert current_slot(datetime.fromisoformat("2026-09-27T14:00:00+00:00"), "America/Chicago", [8, 18]) == "2026-09-27T08:00"
     assert current_slot(datetime.fromisoformat("2026-09-28T00:00:00+00:00"), "America/Chicago", [8, 18]) == "2026-09-27T18:00"
+
+
+def test_digest_test_entrypoint_sends_at_most_once_and_caps_items(tmp_path, monkeypatch):
+    state_path = tmp_path / "state.json"
+    calls = []
+
+    async def fake_send_digest(**kwargs):
+        calls.append(kwargs)
+        state_path.write_text('{"delivered_slots":{},"checked_empty_slots":{},"test_deliveries":[{"pair_ids":["p1"]}]}')
+        return True
+
+    monkeypatch.setattr(digest, "send_digest", fake_send_digest)
+    assert asyncio.run(digest.send_test_digest_once(max_items=10, state_path=state_path))
+    assert calls == [{"test": True, "max_items": 2, "state_path": state_path}]
+    assert not asyncio.run(digest.send_test_digest_once(max_items=10, state_path=state_path))
+    assert len(calls) == 1
+
+
+def test_execute_entrypoint_adds_a0_root_before_plugin_import():
+    source = (PLUGIN / "execute.py").read_text(encoding="utf-8")
+    assert "Path(__file__).resolve().parents[3]" in source
+    assert "!= PLUGIN_ROOT" in source
+    assert 'MCPConfig.update(str(settings.get_settings().get("mcp_servers", "")))' in source
+    assert source.index("sys.path.insert") < source.index("from usr.plugins.arcrift_memory")
 
 
 def test_kernel_bytes_match_backend_surface():
