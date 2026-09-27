@@ -37,6 +37,31 @@ export interface Job {
   updatedAt: Date;
 }
 
+export type MemoryRecordStatus = "current" | "disputed" | "duplicate" | "superseded";
+
+export interface MemorySource {
+  uid: string;
+  source: string;
+  at?: string | null;
+  text: string;
+}
+
+export interface MemoryRecord {
+  rid: string;
+  uid: string;
+  source: string;
+  at?: string | null;
+  kind: string;
+  scope: string;
+  subject_key?: string | null;
+  text: string;
+  sigma?: string | null;
+  status: MemoryRecordStatus;
+  dup_of?: string | null;
+  superseded_by?: string | null;
+  conflicts_with?: string[];
+}
+
 export interface Triple {
   subject: string;
   subjectType: string;

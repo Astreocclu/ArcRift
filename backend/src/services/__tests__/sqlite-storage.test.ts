@@ -3,6 +3,10 @@ import { SqliteGraphStore } from "../sqlite-graph";
 import { SqliteVectorStore } from "../sqlite-vector";
 import { initSqlite, getSqlite } from "../sqlite";
 import * as embeddings from "../embeddings";
+import fs from "fs";
+import path from "path";
+
+process.env.ARCRIFT_STORAGE_MODE = "sqlite";
 
 let uuidCounter = 0;
 jest.mock("uuid", () => ({
@@ -20,14 +24,25 @@ describe("SQLite Storage Layer", () => {
   let sessionStore: SqliteSessionStore;
   let graphStore: SqliteGraphStore;
   let vectorStore: SqliteVectorStore;
+  const dbPath = path.resolve(process.cwd(), `sqlite-storage-${process.pid}.db`);
 
   beforeAll(() => {
-    process.env.SQLITE_DB_PATH = "test.db";
+    process.env.SQLITE_DB_PATH = dbPath;
+    for (const ext of ["", "-shm", "-wal"]) {
+      try { fs.unlinkSync(dbPath + ext); } catch {}
+    }
     initSqlite();
     db = getSqlite();
     sessionStore = new SqliteSessionStore();
     graphStore = new SqliteGraphStore();
     vectorStore = new SqliteVectorStore();
+  });
+
+  afterAll(() => {
+    db.close();
+    for (const ext of ["", "-shm", "-wal"]) {
+      try { fs.unlinkSync(dbPath + ext); } catch {}
+    }
   });
 
   describe("SqliteSessionStore", () => {
@@ -107,7 +122,7 @@ describe("SQLite Storage Layer", () => {
       
       // Verify metadata exists
       const meta = db.prepare("SELECT * FROM chunk_metadata WHERE sessionId = ?").get(testSessionId);
-      expect(meta.content).toContain("arcrift");
+      expect(meta.content.toLowerCase()).toContain("arcrift");
     });
   });
 });

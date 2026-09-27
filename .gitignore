@@ -25,3 +25,7 @@ npm-debug.log*
 
 # CI artifacts (generated at runtime, never committed)
 selector-failures.json
+
+# Python runtime artifacts
+__pycache__/
+*.py[cod]

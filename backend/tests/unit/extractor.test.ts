@@ -9,6 +9,11 @@ describe("Entity Extractor", () => {
     jest.clearAllMocks();
     _resetBackendForTest();
     process.env.GROQ_API_KEY = "test-key";
+    process.env.GRAPH_BACKEND = "ollama";
+  });
+
+  afterAll(() => {
+    delete process.env.GRAPH_BACKEND;
   });
 
   it("should extract entities using Ollama when available", async () => {

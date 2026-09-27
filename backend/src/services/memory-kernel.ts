@@ -1,0 +1,1 @@
+export const MEMORY_KERNEL = "Handle already-authorized routine Git work yourself under repository rules: commit, push, merge, and resolve conflicts from evidence; report genuine blockers without transferring Git mechanics to Reid.";

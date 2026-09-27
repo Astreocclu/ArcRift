@@ -205,6 +205,117 @@ function createTables() {
     )
   `);
 
+  // Curated memory projection. This is deliberately separate from the legacy
+  // 768-dimensional chunk index so both paths can be rolled back independently.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_sources (
+      uid TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      at TEXT,
+      text TEXT NOT NULL,
+      sha256 TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS memory_records (
+      rid TEXT PRIMARY KEY,
+      uid TEXT NOT NULL REFERENCES memory_sources(uid),
+      source TEXT NOT NULL,
+      at TEXT,
+      kind TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      subject_key TEXT,
+      text TEXT NOT NULL,
+      sigma TEXT,
+      status TEXT NOT NULL CHECK(status IN ('current', 'disputed', 'duplicate', 'superseded')),
+      dup_of TEXT REFERENCES memory_records(rid) DEFERRABLE INITIALLY DEFERRED,
+      superseded_by TEXT REFERENCES memory_records(rid) DEFERRABLE INITIALLY DEFERRED,
+      conflicts_with TEXT NOT NULL DEFAULT '[]'
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_records_uid ON memory_records(uid);
+    CREATE INDEX IF NOT EXISTS idx_memory_records_subject ON memory_records(subject_key);
+    CREATE INDEX IF NOT EXISTS idx_memory_records_status ON memory_records(status);
+
+    CREATE TABLE IF NOT EXISTS memory_quarantine (
+      uid TEXT PRIMARY KEY,
+      reason TEXT NOT NULL,
+      source TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS memory_ledger (
+      uid TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS memory_supersession_pairs (
+      pair_id TEXT PRIMARY KEY,
+      old_rid TEXT NOT NULL,
+      new_rid TEXT NOT NULL,
+      similarity REAL,
+      mimo TEXT,
+      luna TEXT,
+      sol TEXT,
+      final TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS memory_conflict_decisions (
+      pair_id TEXT PRIMARY KEY REFERENCES memory_supersession_pairs(pair_id) ON DELETE CASCADE,
+      decision TEXT NOT NULL CHECK(decision IN ('keep_old', 'keep_new', 'keep_both', 'same')),
+      decided_by TEXT NOT NULL,
+      note TEXT,
+      decided_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS memory_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ct_date TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      cost_usd REAL NOT NULL CHECK(cost_usd >= 0),
+      request_hash TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_usage_date ON memory_usage(ct_date);
+    CREATE TABLE IF NOT EXISTS memory_usage_warnings (
+      ct_date TEXT PRIMARY KEY,
+      warned_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS memory_proposals (
+      idempotency_key TEXT PRIMARY KEY,
+      input_hash TEXT NOT NULL,
+      status TEXT NOT NULL,
+      result_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE VIRTUAL TABLE IF NOT EXISTS memory_record_fts USING fts5(
+      rid UNINDEXED,
+      text,
+      subject_key,
+      kind,
+      scope,
+      tokenize='porter'
+    );
+    CREATE TRIGGER IF NOT EXISTS memory_records_fts_insert AFTER INSERT ON memory_records BEGIN
+      INSERT INTO memory_record_fts(rid, text, subject_key, kind, scope)
+      VALUES (new.rid, new.text, coalesce(new.subject_key, ''), new.kind, new.scope);
+    END;
+    CREATE TRIGGER IF NOT EXISTS memory_records_fts_delete AFTER DELETE ON memory_records BEGIN
+      DELETE FROM memory_record_fts WHERE rid = old.rid;
+    END;
+    CREATE TRIGGER IF NOT EXISTS memory_records_fts_update AFTER UPDATE ON memory_records BEGIN
+      DELETE FROM memory_record_fts WHERE rid = old.rid;
+      INSERT INTO memory_record_fts(rid, text, subject_key, kind, scope)
+      VALUES (new.rid, new.text, coalesce(new.subject_key, ''), new.kind, new.scope);
+    END;
+  `);
+
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS vec_memory_records USING vec0(
+      record_id TEXT PRIMARY KEY,
+      embedding float[1024]
+    )
+  `);
+
   logger.success("All SQLite tables initialized successfully");
 }
 

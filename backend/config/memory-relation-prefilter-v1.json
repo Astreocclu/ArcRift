@@ -1,0 +1,492 @@
+{
+  "version": 1,
+  "rule": {
+    "min_count": 20,
+    "keeper_labels": [
+      "authority",
+      "decision",
+      "lesson",
+      "preference",
+      "project_fact"
+    ],
+    "required_keeper_count": 0
+  },
+  "source_hashes": {
+    "/home/astre/command-center-v2/src/gabriel/state/cleanroom/memory-effectiveness-20260926/runs/gate-mimo-pro-v2facts.json": "9d32a981303046e444f4c4d824baec87e8b4fbc35e46df86548e8cb7176979ec",
+    "/home/astre/command-center-v2/src/gabriel/state/cleanroom/memory-effectiveness-20260926/runs/gate-mimo-pro-v2full.json": "c5cd8d2896ac0d4b3ed6a544cd0dd92c3132afbc81e085b856839ec670a2fba3"
+  },
+  "fact_count": 28082,
+  "covered_fact_count": 5480,
+  "relations": [
+    {
+      "relation": "ADDRESSES_OBJECTIVE",
+      "fact_count": 24,
+      "keeper_count": 0
+    },
+    {
+      "relation": "ASSOCIATED_WITH",
+      "fact_count": 29,
+      "keeper_count": 0
+    },
+    {
+      "relation": "CALLS",
+      "fact_count": 23,
+      "keeper_count": 0
+    },
+    {
+      "relation": "CHANGED_FROM",
+      "fact_count": 20,
+      "keeper_count": 0
+    },
+    {
+      "relation": "COMPLETED",
+      "fact_count": 31,
+      "keeper_count": 0
+    },
+    {
+      "relation": "COMPLETED_ON",
+      "fact_count": 23,
+      "keeper_count": 0
+    },
+    {
+      "relation": "CONTAINS_FILE",
+      "fact_count": 23,
+      "keeper_count": 0
+    },
+    {
+      "relation": "DERIVED_AT",
+      "fact_count": 268,
+      "keeper_count": 0
+    },
+    {
+      "relation": "ENABLES",
+      "fact_count": 21,
+      "keeper_count": 0
+    },
+    {
+      "relation": "FEAT",
+      "fact_count": 28,
+      "keeper_count": 0
+    },
+    {
+      "relation": "FOUND",
+      "fact_count": 20,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAD",
+      "fact_count": 22,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_ACTION",
+      "fact_count": 25,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_ARTIFACT",
+      "fact_count": 52,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_ASSISTANT_TURNS",
+      "fact_count": 141,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_CANON",
+      "fact_count": 87,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_COMMAND",
+      "fact_count": 23,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_COMMIT",
+      "fact_count": 55,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_COMPLETENESS",
+      "fact_count": 98,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_COUNT",
+      "fact_count": 86,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_DATE",
+      "fact_count": 52,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_DERIVED_AT",
+      "fact_count": 121,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_DIVISION",
+      "fact_count": 110,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_DIVISION_SCORE",
+      "fact_count": 38,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_ENTRIES",
+      "fact_count": 26,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_EXIT_CODE",
+      "fact_count": 20,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_FIELD",
+      "fact_count": 32,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_FILE",
+      "fact_count": 87,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_GAP",
+      "fact_count": 24,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_HASH",
+      "fact_count": 33,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_HDT_LEVEL",
+      "fact_count": 86,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_ID",
+      "fact_count": 62,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_LINES",
+      "fact_count": 192,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_MESSAGE",
+      "fact_count": 70,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_MODEL_CHANGES",
+      "fact_count": 23,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_MODIFIED",
+      "fact_count": 25,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_MODIFIED_FILE",
+      "fact_count": 29,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_OBJECTIVE_MATCH",
+      "fact_count": 26,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_OPTIONS",
+      "fact_count": 21,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_PARAMETER",
+      "fact_count": 24,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_PARKED_COUNT",
+      "fact_count": 43,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_PASS_COUNT",
+      "fact_count": 26,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_PHASES",
+      "fact_count": 24,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_RECENT_SUBAGENT_ARTIFACTS",
+      "fact_count": 23,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_RESULT",
+      "fact_count": 110,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_SCORE",
+      "fact_count": 40,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_SECTION",
+      "fact_count": 104,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_SECTIONS",
+      "fact_count": 21,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_SESSION",
+      "fact_count": 24,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_SEVERITY",
+      "fact_count": 35,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_SIGMA",
+      "fact_count": 364,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_SIZE",
+      "fact_count": 201,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_STRUCTURE",
+      "fact_count": 29,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_TAB",
+      "fact_count": 22,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_TAG",
+      "fact_count": 74,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_TIMESTAMP",
+      "fact_count": 22,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_TITLE",
+      "fact_count": 25,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_TOOL_RESULT_EVENTS",
+      "fact_count": 118,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_TOOLRESULT_EVENTS",
+      "fact_count": 82,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_TOTAL_JSONL_SIZE",
+      "fact_count": 38,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_TOTAL_LINES",
+      "fact_count": 42,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_TRIPLES",
+      "fact_count": 23,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_UNTRACKED",
+      "fact_count": 38,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_UNTRACKED_FILE",
+      "fact_count": 52,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_USER_TURNS",
+      "fact_count": 62,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_VALUE",
+      "fact_count": 164,
+      "keeper_count": 0
+    },
+    {
+      "relation": "HAS_WORKFLOW_STEP",
+      "fact_count": 22,
+      "keeper_count": 0
+    },
+    {
+      "relation": "IMPLEMENTS",
+      "fact_count": 76,
+      "keeper_count": 0
+    },
+    {
+      "relation": "IS_ARTIFACT_OF",
+      "fact_count": 22,
+      "keeper_count": 0
+    },
+    {
+      "relation": "IS_PART_OF",
+      "fact_count": 34,
+      "keeper_count": 0
+    },
+    {
+      "relation": "IS_TYPE",
+      "fact_count": 49,
+      "keeper_count": 0
+    },
+    {
+      "relation": "LINES",
+      "fact_count": 23,
+      "keeper_count": 0
+    },
+    {
+      "relation": "LOCATED_AT",
+      "fact_count": 352,
+      "keeper_count": 0
+    },
+    {
+      "relation": "MENTIONED",
+      "fact_count": 81,
+      "keeper_count": 0
+    },
+    {
+      "relation": "MENTIONS",
+      "fact_count": 111,
+      "keeper_count": 0
+    },
+    {
+      "relation": "MERGES",
+      "fact_count": 33,
+      "keeper_count": 0
+    },
+    {
+      "relation": "MIGRATED",
+      "fact_count": 23,
+      "keeper_count": 0
+    },
+    {
+      "relation": "MODIFIED",
+      "fact_count": 49,
+      "keeper_count": 0
+    },
+    {
+      "relation": "PART_OF",
+      "fact_count": 44,
+      "keeper_count": 0
+    },
+    {
+      "relation": "PASSES",
+      "fact_count": 45,
+      "keeper_count": 0
+    },
+    {
+      "relation": "REFERENCES",
+      "fact_count": 38,
+      "keeper_count": 0
+    },
+    {
+      "relation": "RESOLVED",
+      "fact_count": 23,
+      "keeper_count": 0
+    },
+    {
+      "relation": "RESULT",
+      "fact_count": 24,
+      "keeper_count": 0
+    },
+    {
+      "relation": "SHOWS",
+      "fact_count": 49,
+      "keeper_count": 0
+    },
+    {
+      "relation": "SIZE",
+      "fact_count": 35,
+      "keeper_count": 0
+    },
+    {
+      "relation": "STARTED_AT",
+      "fact_count": 49,
+      "keeper_count": 0
+    },
+    {
+      "relation": "SURFACES",
+      "fact_count": 36,
+      "keeper_count": 0
+    },
+    {
+      "relation": "TRIGGERS",
+      "fact_count": 29,
+      "keeper_count": 0
+    },
+    {
+      "relation": "UNTRACKED",
+      "fact_count": 43,
+      "keeper_count": 0
+    },
+    {
+      "relation": "UPDATED",
+      "fact_count": 61,
+      "keeper_count": 0
+    },
+    {
+      "relation": "UPDATED_WITH",
+      "fact_count": 27,
+      "keeper_count": 0
+    },
+    {
+      "relation": "USED",
+      "fact_count": 21,
+      "keeper_count": 0
+    },
+    {
+      "relation": "VERIFIED",
+      "fact_count": 48,
+      "keeper_count": 0
+    },
+    {
+      "relation": "WRITTEN_TO",
+      "fact_count": 27,
+      "keeper_count": 0
+    }
+  ]
+}

@@ -19,6 +19,7 @@ import sessionRoutes from "./routes/session";
 import jobsRoutes from "./routes/jobs";
 import healthRoutes from "./routes/health";
 import settingsRoutes from "./routes/settings";
+import { createMemoryMcpHttpHandler } from "./mcp/server";
 
 
 // ── #9: .env validation — fail fast with a clear message ──────────
@@ -165,6 +166,12 @@ async function start() {
 
     // Start background job worker for extraction tasks
     await startWorker();
+
+    if ((process.env.ARCRIFT_MEMORY_ENABLED || "false") === "true") {
+      const token = process.env.ARCRIFT_MCP_BEARER_TOKEN;
+      if (!token) throw new Error("ARCRIFT_MCP_BEARER_TOKEN is required when curated memory is enabled");
+      app.all("/mcp", await createMemoryMcpHttpHandler({ token }));
+    }
   } catch (err) {
     logger.error("Fatal: Database connection failed. ArcRift cannot start.");
     logger.error(err instanceof Error ? err.message : String(err));

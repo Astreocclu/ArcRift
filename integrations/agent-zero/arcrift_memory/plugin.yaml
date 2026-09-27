@@ -1,0 +1,7 @@
+name: arcrift_memory
+title: ArcRift Memory
+description: Adds curated ArcRift recall, shadow proposals, and send-only conflict digests.
+version: 1.0.0
+settings_sections: []
+per_project_config: false
+per_agent_config: false
