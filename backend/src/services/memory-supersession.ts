@@ -29,10 +29,13 @@ export class MemorySupersessionService {
   }
 
   async planCandidate(record: MemoryRecord, embedding: number[], staged: StagedCandidate[] = []): Promise<SupersessionPlan> {
+    const stagedSuperseded = new Set(staged.filter(item => item.plan.final === "newer").map(item => item.plan.matched_rid));
     const stagedLive = staged
       .filter(item => !["same", "older"].includes(item.plan.final))
       .map(item => ({ ...item.record, conflicts_with: item.plan.final === "conflict" ? [item.plan.matched_rid!] : [] }));
-    const live = [...(this.db.prepare("SELECT * FROM memory_records WHERE status IN ('current','disputed') ORDER BY rid").all() as any[]), ...stagedLive];
+    const databaseLive = (this.db.prepare("SELECT * FROM memory_records WHERE status IN ('current','disputed') ORDER BY rid").all() as any[])
+      .filter(row => !stagedSuperseded.has(row.rid));
+    const live = [...stagedLive, ...databaseLive];
     const exact = live.find(row => normalize(row.text) === normalize(record.text));
     if (exact) {
       const id = pairId(exact.rid, record.rid);
@@ -79,7 +82,12 @@ export class MemorySupersessionService {
     this.repository.insertRecord(stored);
     this.repository.upsertEmbedding(record.rid, embedding);
     if (plan.final === "newer") this.db.prepare("UPDATE memory_records SET status='superseded', superseded_by=? WHERE rid=?").run(record.rid, plan.matched_rid);
-    if (plan.final === "conflict") this.db.prepare("UPDATE memory_records SET status='disputed', conflicts_with=? WHERE rid=?").run(JSON.stringify([record.rid]), plan.matched_rid);
+    if (plan.final === "conflict") {
+      const matched = this.db.prepare("SELECT conflicts_with FROM memory_records WHERE rid=?").get(plan.matched_rid) as { conflicts_with: string } | undefined;
+      if (!matched) throw new Error(`Conflict record is missing: ${plan.matched_rid}`);
+      const peers = Array.from(new Set([...JSON.parse(matched.conflicts_with || "[]"), record.rid])).sort();
+      this.db.prepare("UPDATE memory_records SET status='disputed', conflicts_with=? WHERE rid=?").run(JSON.stringify(peers), plan.matched_rid);
+    }
     if (plan.pair_id && plan.matched_rid) {
       this.repository.addSupersessionPair({
         pair_id: plan.pair_id, old_rid: plan.matched_rid, new_rid: record.rid,

@@ -53,6 +53,17 @@ describe("memory supersession", () => {
     expect(() => repository.decideConflict(result.pair_id!, "keep_new", "reviewer")).toThrow(/already resolved/);
   });
 
+  it("appends a new conflict without erasing existing peers", async () => {
+    const conflict = new MemorySupersessionService(getSqlite(), async () => "conflict");
+    await conflict.applyCandidate(candidate("First contradiction"), new Array(1024).fill(0.12));
+    getSqlite().prepare("UPDATE memory_records SET subject_key='other' WHERE rid='new'").run();
+    repository.upsertSource({ uid: "third-source", source: "fixture", text: "third" });
+    await conflict.applyCandidate({ ...candidate("Second contradiction"), rid: "third", uid: "third-source" }, new Array(1024).fill(0.13));
+    const old = getSqlite().prepare("SELECT status, conflicts_with FROM memory_records WHERE rid='old'").get() as any;
+    expect(old.status).toBe("disputed");
+    expect(JSON.parse(old.conflicts_with)).toEqual(["new", "third"]);
+  });
+
   it("preserves a record's other unresolved conflicts", async () => {
     const conflict = new MemorySupersessionService(getSqlite(), async () => "conflict");
     const first = await conflict.applyCandidate(candidate("First contradiction"), new Array(1024).fill(0.12));

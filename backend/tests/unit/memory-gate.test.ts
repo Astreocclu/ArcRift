@@ -144,6 +144,10 @@ describe("curated memory write gate", () => {
   });
 
   it("plans later records against earlier records in the same active proposal", async () => {
+    const repository = new MemoryRecordRepository(getSqlite());
+    repository.upsertSource({ uid: "prior-source", source: "fixture", text: "prior" });
+    repository.insertRecord({ rid: "prior", uid: "prior-source", source: "fixture", kind: "decision", scope: "global", subject_key: "shared", text: "Prior rule", status: "current" });
+    repository.upsertEmbedding("prior", new Array(1024).fill(0.05));
     const multi = { ...keeper, records: [
       { subject_key: "shared", text: "First rule" },
       { subject_key: "shared", text: "New rule" },
@@ -151,9 +155,11 @@ describe("curated memory write gate", () => {
     const providers = {
       callMimo: jest.fn()
         .mockResolvedValueOnce({ value: multi, cost: 0, requestHash: "triage" })
-        .mockResolvedValueOnce({ value: { decision: "newer" }, cost: 0, requestHash: "pair" }),
+        .mockResolvedValueOnce({ value: { decision: "newer" }, cost: 0, requestHash: "pair-1" })
+        .mockResolvedValueOnce({ value: { decision: "newer" }, cost: 0, requestHash: "pair-2" }),
       callLuna: jest.fn()
         .mockResolvedValueOnce(multi)
+        .mockResolvedValueOnce({ decision: "newer" })
         .mockResolvedValueOnce({ decision: "newer" }),
       callSol: jest.fn(),
     };
@@ -161,8 +167,12 @@ describe("curated memory write gate", () => {
     const result = await gate.propose({ content: "two versions", source: "a0", idempotencyKey: "staged" });
     expect(result.status).toBe("accepted");
     const rows = getSqlite().prepare("SELECT rid,status,superseded_by FROM memory_records ORDER BY rid").all() as any[];
-    expect(rows).toHaveLength(2);
-    expect(rows[0]).toMatchObject({ status: "superseded", superseded_by: rows[1].rid });
-    expect(rows[1].status).toBe("current");
+    expect(rows).toHaveLength(3);
+    const prior = rows.find(row => row.rid === "prior");
+    const first = rows.find(row => row.rid.endsWith("#0"));
+    const second = rows.find(row => row.rid.endsWith("#1"));
+    expect(prior).toMatchObject({ status: "superseded", superseded_by: first.rid });
+    expect(first).toMatchObject({ status: "superseded", superseded_by: second.rid });
+    expect(second.status).toBe("current");
   });
 });
