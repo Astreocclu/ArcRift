@@ -3,7 +3,7 @@ import os from "os";
 import path from "path";
 import { initSqlite, getSqlite } from "../../src/services/sqlite";
 import { MemoryBudget } from "../../src/services/memory-budget";
-import { MIMO_ATTEMPT_RESERVATION_USD, MIMO_WORST_CASE_USD, MemoryProviders } from "../../src/services/memory-providers";
+import { DEFAULT_PI_TIMEOUT_MS, MIMO_ATTEMPT_RESERVATION_USD, MIMO_WORST_CASE_USD, MemoryProviders } from "../../src/services/memory-providers";
 
 describe("memory model providers", () => {
   it("calls MiMo with low reasoning and returns structured usage", async () => {
@@ -30,11 +30,13 @@ describe("memory model providers", () => {
     const providers = new MemoryProviders({
       openRouterKey: "test-key",
       httpPost: async () => { throw new Error("unused"); },
-      execPi: async (model, promptPath) => { invocations.push({ model, promptPath }); return '```json\n{"decision":"conflict"}\n```'; },
+      execPi: async (model, promptPath, timeoutMs) => { invocations.push({ model, promptPath, timeoutMs }); return '```json\n{"decision":"conflict"}\n```'; },
     });
     expect((await providers.callLuna("x")).decision).toBe("conflict");
     expect((await providers.callSol("x")).decision).toBe("conflict");
     expect(invocations.map(item => item.model)).toEqual(["openai-codex/gpt-6-luna", "openai-codex/gpt-6-sol"]);
+    expect(DEFAULT_PI_TIMEOUT_MS).toBe(26_000);
+    expect(invocations.map(item => item.timeoutMs)).toEqual([26_000, 26_000]);
   });
 
   it("rejects malformed model JSON and retry exhaustion", async () => {

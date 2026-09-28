@@ -17,7 +17,7 @@ class ArcRiftProposeExchange(Extension):
             return
         context_id = str(self.agent.context.id)
         key = proposal_key(context_id, exchange)
-        timeout = float(config.get("proposal_timeout_seconds", 15))
+        timeout = float(config.get("proposal_timeout_seconds", 300))
         task = DeferredTask(thread_name=THREAD_BACKGROUND)
         task.start_task(self._submit, exchange, key, timeout)
 
@@ -29,7 +29,7 @@ class ArcRiftProposeExchange(Extension):
                 "memory_propose",
                 {"content": proposal_content(exchange), "source": "agent-zero", "idempotencyKey": key},
                 agent=self.agent,
-                timeout_seconds=max(1, min(timeout, 30)),
+                timeout_seconds=max(1, min(timeout, 300)),
             )
         except Exception:
             return

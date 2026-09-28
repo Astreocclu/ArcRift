@@ -1,7 +1,7 @@
 enabled: true
 mcp_server_name: arcrift
 proposal_enabled: true
-proposal_timeout_seconds: 15
+proposal_timeout_seconds: 300
 global_behaviour_enabled: true
 digest_enabled: false
 digest_handler_name: ""

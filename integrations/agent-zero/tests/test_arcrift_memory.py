@@ -59,6 +59,14 @@ def test_proposal_extension_uses_a0_background_task():
     assert "asyncio.create_task" not in source
 
 
+def test_proposal_timeout_covers_the_bounded_provider_chain():
+    source = (PLUGIN / "extensions/python/monologue_end/_40_propose_exchange.py").read_text(encoding="utf-8")
+    config = (PLUGIN / "default_config.yaml").read_text(encoding="utf-8")
+    assert "proposal_timeout_seconds: 300" in config
+    assert 'config.get("proposal_timeout_seconds", 300)' in source
+    assert "min(timeout, 300)" in source
+
+
 def test_memory_tool_call_is_bounded_and_parses_json():
     class Config:
         async def call_tool(self, name, arguments):
@@ -184,11 +192,40 @@ def test_execute_entrypoint_adds_a0_root_before_plugin_import():
 def test_kernel_bytes_match_backend_surface():
     prompt_file = PLUGIN / "prompts/arcrift.memory.kernel.md"
     extension_file = PLUGIN / "extensions/python/system_prompt/_15_memory_kernel.py"
-    if not prompt_file.exists():
-        assert not extension_file.exists(), "a failed cleanroom eval must omit both A0 kernel surfaces"
-        return
     backend = (ROOT.parents[1] / "backend/src/services/memory-kernel.ts").read_text(encoding="utf-8")
     match = re.search(r'MEMORY_KERNEL = "([^"]+)";', backend)
     assert match
-    assert prompt_file.read_text(encoding="utf-8").rstrip("\n") == match.group(1)
+    assert prompt_file.read_bytes() == match.group(1).encode("utf-8")
     assert extension_file.exists()
+
+    class Extension:
+        def __init__(self, agent=None):
+            self.agent = agent
+
+    helper_module = types.ModuleType("helpers")
+    extension_module = types.ModuleType("helpers.extension")
+    extension_module.Extension = Extension
+    helper_module.files = types.SimpleNamespace(
+        get_abs_path=lambda *parts: str(prompt_file),
+        exists=lambda target: Path(target).exists(),
+        read_file=lambda target: Path(target).read_text(encoding="utf-8"),
+    )
+    helper_module.plugins = types.SimpleNamespace(get_plugin_config=lambda *args, **kwargs: {"enabled": True})
+    prior_helpers = sys.modules.get("helpers")
+    prior_extension = sys.modules.get("helpers.extension")
+    try:
+        sys.modules["helpers"] = helper_module
+        sys.modules["helpers.extension"] = extension_module
+        module = load_module(extension_file, "arcrift_memory_kernel_test")
+        prompts = []
+        asyncio.run(module.ArcRiftMemoryKernel(types.SimpleNamespace()).execute(prompts))
+        assert prompts == [match.group(1)]
+    finally:
+        if prior_helpers is None:
+            sys.modules.pop("helpers", None)
+        else:
+            sys.modules["helpers"] = prior_helpers
+        if prior_extension is None:
+            sys.modules.pop("helpers.extension", None)
+        else:
+            sys.modules["helpers.extension"] = prior_extension

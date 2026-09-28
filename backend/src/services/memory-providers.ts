@@ -3,11 +3,9 @@ import crypto from "crypto";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { execFile } from "child_process";
-import { promisify } from "util";
 import { MemoryBudget } from "./memory-budget";
+import { runPiProcess } from "./pi-executor";
 
-const execFileAsync = promisify(execFile);
 export const MIMO_MODEL = "xiaomi/mimo-v2.6-pro";
 export const LUNA_MODEL = "openai-codex/gpt-6-luna";
 export const SOL_MODEL = "openai-codex/gpt-6-sol";
@@ -15,9 +13,18 @@ export const MIMO_MAX_TOKENS = 512;
 export const MIMO_MAX_INPUT_BYTES = 40_000;
 export const MIMO_ATTEMPT_RESERVATION_USD = 0.05;
 export const MIMO_WORST_CASE_USD = (MIMO_MAX_INPUT_BYTES * 0.5 + MIMO_MAX_TOKENS * 1) / 1_000_000;
+export const DEFAULT_PI_TIMEOUT_MS = 26_000;
 
 export type HttpPost = (url: string, body: any, config: any) => Promise<{ data: any }>;
 export type PiExecutor = (model: string, promptPath: string, timeoutMs: number) => Promise<string>;
+
+export function piProcessArgs(model: string, promptPath: string): string[] {
+  return [
+    "--print", "--no-session", "--no-tools", "--no-context-files", "--no-extensions",
+    "--no-skills", "--no-prompt-templates", "--model", model, "--thinking", "high",
+    `@${promptPath}`, "Return only one JSON object matching the requested schema.",
+  ];
+}
 
 function parseJson(text: string): any {
   const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
@@ -30,12 +37,12 @@ function parseJson(text: string): any {
   }
 }
 
-async function defaultExecPi(model: string, promptPath: string, timeoutMs: number): Promise<string> {
-  const result = await execFileAsync("/home/astre/bin/pi", [
-    "--print", "--no-session", "--no-tools", "--no-context-files", "--no-extensions",
-    "--no-skills", "--no-prompt-templates", "--model", model, "--thinking", "high",
-    `@${promptPath}`, "Return only one JSON object matching the requested schema.",
-  ], { maxBuffer: 4 * 1024 * 1024, timeout: timeoutMs, killSignal: "SIGKILL" });
+export async function defaultExecPi(model: string, promptPath: string, timeoutMs: number): Promise<string> {
+  const result = await runPiProcess(piProcessArgs(model, promptPath), { timeoutMs });
+  if (result.timedOut) throw new Error(`Pi provider timed out after ${timeoutMs}ms`);
+  if (result.bufferExceeded) throw new Error("Pi provider exceeded the output limit");
+  if (result.spawnError) throw new Error(`Pi provider failed to start: ${result.spawnError}`);
+  if (result.exitCode !== 0) throw new Error(`Pi provider failed with exit ${String(result.exitCode)} signal ${String(result.signal)}: ${result.stderr.slice(-2_000)}`);
   return result.stdout;
 }
 
@@ -62,7 +69,7 @@ export class MemoryProviders {
     this.execPi = options.execPi ?? defaultExecPi;
     this.retries = options.retries ?? 2;
     this.piRetries = options.piRetries ?? 0;
-    this.piTimeoutMs = options.piTimeoutMs ?? 12_000;
+    this.piTimeoutMs = options.piTimeoutMs ?? DEFAULT_PI_TIMEOUT_MS;
     this.budget = options.budget;
   }
 

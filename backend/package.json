@@ -21,6 +21,7 @@
     "memory:import-v5": "ts-node scripts/import-memory-v5.ts",
     "memory:replay-gate": "ts-node scripts/replay-memory-gate.ts",
     "memory:eval-git-kernel": "ts-node src/scripts/eval-git-kernel.ts",
+    "memory:measure-pi-gate": "ts-node src/scripts/measure-pi-gate-latency.ts",
     "memory:backup": "ts-node scripts/backup-memory-db.ts",
     "memory:verify-backup": "ts-node scripts/verify-memory-db.ts",
     "memory:verify-production": "ts-node scripts/verify-memory-db.ts --production"
