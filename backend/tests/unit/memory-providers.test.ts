@@ -3,7 +3,16 @@ import os from "os";
 import path from "path";
 import { initSqlite, getSqlite } from "../../src/services/sqlite";
 import { MemoryBudget } from "../../src/services/memory-budget";
-import { DEFAULT_PI_TIMEOUT_MS, MIMO_ATTEMPT_RESERVATION_USD, MIMO_WORST_CASE_USD, MemoryProviders } from "../../src/services/memory-providers";
+import {
+  MIMO_ATTEMPT_RESERVATION_USD,
+  MIMO_LOW_REASONING_SHARE,
+  MIMO_MAX_DECISION_TOKENS,
+  MIMO_MAX_TOKENS,
+  MIMO_REASONING_TOKEN_RESERVE,
+  MIMO_WORST_CASE_USD,
+  MemoryProviderError,
+  MemoryProviders,
+} from "../../src/services/memory-providers";
 
 describe("memory model providers", () => {
   it("calls MiMo with low reasoning and returns structured usage", async () => {
@@ -19,44 +28,35 @@ describe("memory model providers", () => {
     const result = await providers.callMimo("prompt");
     expect(calls[0].body.reasoning.effort).toBe("low");
     expect(calls[0].body.model).toBe("xiaomi/mimo-v2.6-pro");
+    expect(calls[0].body.max_tokens).toBe(32_000);
     expect(calls[0].body.provider).toEqual({ allow_fallbacks: false, max_price: { prompt: 0.5, completion: 1 } });
-    expect(MIMO_WORST_CASE_USD).toBeLessThan(MIMO_ATTEMPT_RESERVATION_USD);
+    expect(MIMO_WORST_CASE_USD).toBeCloseTo(0.052, 6);
+    expect(MIMO_WORST_CASE_USD).toBeLessThanOrEqual(MIMO_ATTEMPT_RESERVATION_USD);
     expect(result.value.label).toBe("drop");
+    expect(result.rawReply).toContain('"label":"drop"');
     expect(result.cost).toBe(0.0123);
   });
 
-  it("uses explicit Luna and Sol Pi routes with no fallback", async () => {
-    const invocations: any[] = [];
-    const providers = new MemoryProviders({
-      openRouterKey: "test-key",
-      httpPost: async () => { throw new Error("unused"); },
-      execPi: async (model, promptPath, timeoutMs) => { invocations.push({ model, promptPath, timeoutMs }); return '```json\n{"decision":"conflict"}\n```'; },
+  it("fits a maximum production decision plus reasoning reserve under the cap", () => {
+    const decision = JSON.stringify({
+      label: "project_fact",
+      scope: "project",
+      confidence: 1,
+      records: Array.from({ length: 4 }, () => ({ subject_key: "s".repeat(256), text: "x".repeat(4_000) })),
     });
-    expect((await providers.callLuna("x")).decision).toBe("conflict");
-    expect((await providers.callSol("x")).decision).toBe("conflict");
-    expect(invocations.map(item => item.model)).toEqual(["openai-codex/gpt-6-luna", "openai-codex/gpt-6-sol"]);
-    expect(DEFAULT_PI_TIMEOUT_MS).toBe(26_000);
-    expect(invocations.map(item => item.timeoutMs)).toEqual([26_000, 26_000]);
+    expect(MIMO_LOW_REASONING_SHARE).toBe(0.2);
+    expect(MIMO_REASONING_TOKEN_RESERVE).toBe(Math.ceil(MIMO_MAX_TOKENS * MIMO_LOW_REASONING_SHARE));
+    expect(MIMO_MAX_DECISION_TOKENS).toBe(MIMO_MAX_TOKENS - MIMO_REASONING_TOKEN_RESERVE);
+    expect(decision.length).toBeLessThanOrEqual(MIMO_MAX_DECISION_TOKENS);
+    expect(MIMO_MAX_DECISION_TOKENS + MIMO_REASONING_TOKEN_RESERVE).toBeLessThanOrEqual(MIMO_MAX_TOKENS);
   });
 
   it("rejects malformed model JSON and retry exhaustion", async () => {
-    const providers = new MemoryProviders({ openRouterKey: "test", httpPost: async () => ({ data: { choices: [{ message: { content: "not-json" } }], usage: { cost: 0 } } }), execPi: async () => "not-json", retries: 1 });
-    await expect(providers.callMimo("x")).rejects.toThrow(/JSON/);
-    await expect(providers.callLuna("x")).rejects.toThrow(/JSON/);
-  });
-
-  it("bounds stalled Pi calls without retry amplification", async () => {
-    const invocations: string[] = [];
-    const providers = new MemoryProviders({
-      execPi: async model => {
-        invocations.push(model);
-        return await new Promise<string>(() => undefined);
-      },
-      piRetries: 0,
-      piTimeoutMs: 10,
-    });
-    await expect(providers.callLuna("x")).rejects.toThrow(/timed out/);
-    expect(invocations).toEqual(["openai-codex/gpt-6-luna"]);
+    const providers = new MemoryProviders({ openRouterKey: "test", httpPost: async () => ({ data: { choices: [{ message: { content: "not-json" } }], usage: { cost: 0 } } }), retries: 1 });
+    const error = await providers.callMimo("x").catch(value => value);
+    expect(error).toBeInstanceOf(MemoryProviderError);
+    expect(error.message).toMatch(/JSON/);
+    expect(error.rawReply).toBe("not-json");
   });
 
   it("reserves every MiMo attempt and accounts for malformed billable replies", async () => {

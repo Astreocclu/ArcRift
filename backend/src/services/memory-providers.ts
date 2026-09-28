@@ -9,9 +9,14 @@ import { runPiProcess } from "./pi-executor";
 export const MIMO_MODEL = "xiaomi/mimo-v2.6-pro";
 export const LUNA_MODEL = "openai-codex/gpt-6-luna";
 export const SOL_MODEL = "openai-codex/gpt-6-sol";
-export const MIMO_MAX_TOKENS = 512;
+export const MIMO_MAX_TOKENS = 32_000;
+// OpenRouter maps low reasoning effort to approximately 20% of max_tokens.
+// https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
+export const MIMO_LOW_REASONING_SHARE = 0.2;
+export const MIMO_REASONING_TOKEN_RESERVE = Math.ceil(MIMO_MAX_TOKENS * MIMO_LOW_REASONING_SHARE);
+export const MIMO_MAX_DECISION_TOKENS = MIMO_MAX_TOKENS - MIMO_REASONING_TOKEN_RESERVE;
 export const MIMO_MAX_INPUT_BYTES = 40_000;
-export const MIMO_ATTEMPT_RESERVATION_USD = 0.05;
+export const MIMO_ATTEMPT_RESERVATION_USD = 0.06;
 export const MIMO_WORST_CASE_USD = (MIMO_MAX_INPUT_BYTES * 0.5 + MIMO_MAX_TOKENS * 1) / 1_000_000;
 export const DEFAULT_PI_TIMEOUT_MS = 26_000;
 
@@ -34,6 +39,13 @@ function parseJson(text: string): any {
     return value;
   } catch (error) {
     throw new Error(`Invalid provider JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+export class MemoryProviderError extends Error {
+  constructor(message: string, readonly rawReply?: string) {
+    super(message);
+    this.name = "MemoryProviderError";
   }
 }
 
@@ -73,10 +85,11 @@ export class MemoryProviders {
     this.budget = options.budget;
   }
 
-  async callMimo(prompt: string): Promise<{ value: any; cost: number; requestHash: string }> {
+  async callMimo(prompt: string): Promise<{ value: any; cost: number; requestHash: string; rawReply: string }> {
     if (!this.openRouterKey) throw new Error("An OpenRouter key is required for MiMo");
     if (Buffer.byteLength(prompt, "utf8") > MIMO_MAX_INPUT_BYTES) throw new Error("MiMo prompt exceeds the budgeted input limit");
     let lastError: unknown;
+    let lastRawReply: string | undefined;
     for (let attempt = 0; attempt <= this.retries; attempt++) {
       const reservationId = crypto.randomUUID();
       if (this.budget && !this.budget.reserve(reservationId, "openrouter", MIMO_MODEL, MIMO_ATTEMPT_RESERVATION_USD)) throw new Error("budget_hold");
@@ -97,14 +110,23 @@ export class MemoryProviders {
         const requestHash = crypto.createHash("sha256").update(`${reservationId}\0${prompt}\0${String(content)}\0${attempt}`).digest("hex");
         this.budget?.settle(reservationId, cost, requestHash);
         if (typeof content !== "string") throw new Error("Invalid provider JSON: missing message content");
-        const value = parseJson(content);
-        return { value, cost, requestHash };
+        lastRawReply = content;
+        let value: any;
+        try {
+          value = parseJson(content);
+        } catch (error) {
+          throw new MemoryProviderError(error instanceof Error ? error.message : String(error), content);
+        }
+        return { value, cost, requestHash, rawReply: content };
       } catch (error) {
         this.budget?.forfeit(reservationId);
         lastError = error;
+        if (error instanceof MemoryProviderError && error.rawReply !== undefined) lastRawReply = error.rawReply;
       }
     }
-    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+    if (lastError instanceof MemoryProviderError) throw lastError;
+    const message = lastError instanceof Error ? lastError.message : String(lastError);
+    throw lastRawReply === undefined ? new Error(message) : new MemoryProviderError(message, lastRawReply);
   }
 
   callLuna(prompt: string): Promise<any> { return this.callPi(LUNA_MODEL, prompt); }

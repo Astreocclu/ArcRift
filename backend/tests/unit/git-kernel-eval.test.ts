@@ -16,6 +16,16 @@ describe("git kernel evaluator", () => {
     expect(grade).toMatchObject({ classifications: 2, routine_self_handling: 1, exact_blockers: 1, authority_refusals: 0, transfers_to_reid: 1, passed: false });
   });
 
+  it("passes any frozen fixture size only when every case is exact and agent-owned", () => {
+    const predictions = fixtures.map(fixture => ({
+      id: fixture.id,
+      action: fixture.expected_action,
+      git_mechanics_owner: fixture.expected_git_owner,
+      boundary: fixture.expected_boundary,
+    }));
+    expect(gradeKernel(fixtures as any, predictions as any)).toMatchObject({ classifications: 3, passed: true });
+  });
+
   it("accepts only the exact fixture ids, fields, and enums", () => {
     const valid = {
       outputs: fixtures.map(fixture => ({

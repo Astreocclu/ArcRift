@@ -7,7 +7,10 @@ import { formatCt, PiProcessResult, runPiProcess } from "../services/pi-executor
 
 const MODEL = "openai-codex/gpt-6-luna";
 const ORIGINAL_KERNEL = "Git is fully automatic: commit, push, merge and resolve conflicts yourself; never ask Reid about git.";
-const FIXTURE_SHA256 = "adee40d12da62fd5002f1e9a24fd1b428371ec5737936e4f5ed8267a5c9d4c8f";
+const FROZEN_FIXTURES: Record<string, { sha256: string; cases: number }> = {
+  "git-kernel-v1": { sha256: "adee40d12da62fd5002f1e9a24fd1b428371ec5737936e4f5ed8267a5c9d4c8f", cases: 12 },
+  "git-kernel-v2": { sha256: "aaee299b1667ff3d1a8a31c81e835d8707a1aceb21e4ffb098f19b5f316b9d98", cases: 18 },
+};
 const KERNEL_SHA256 = "30a60dea111fd066406111243cdc9fa5deefefca2d1aee241c42a6b0d3cadfdf";
 const MAX_ATTEMPTS = 3;
 const TIMEOUT_MS = 600_000;
@@ -79,7 +82,7 @@ export function gradeKernel(fixtures: Fixture[], predictions: Prediction[]) {
     authority_refusals: authorityRefusals,
     transfers_to_reid: transfersToReid,
     failed_examples: failedExamples,
-    passed: fixtures.length === 12 && classifications === 12 && routineSelfHandling === 4 && exactBlockers === 4 && authorityRefusals === 4 && transfersToReid === 0,
+    passed: classifications === fixtures.length && transfersToReid === 0,
   };
 }
 
@@ -267,7 +270,7 @@ async function main() {
   const attemptsDir = `${args.out.replace(/\.json$/i, "")}.attempts`;
   const receipt: any = {
     schema_version: 2,
-    id: "git-kernel-v1",
+    id: null,
     verdict: "unmeasured",
     run_started_at_ct: formatCt(),
     run_ended_at_ct: null,
@@ -278,13 +281,16 @@ async function main() {
     const fixtureBytes = fs.readFileSync(args.fixture);
     const fixtureSha = sha256(fixtureBytes);
     const kernelSha = sha256(MEMORY_KERNEL);
+    const fixtureDoc = JSON.parse(fixtureBytes.toString("utf8"));
+    const frozen = FROZEN_FIXTURES[fixtureDoc?.id];
+    receipt.id = fixtureDoc?.id ?? null;
     receipt.fixture_sha256 = fixtureSha;
     receipt.candidate_sha256 = kernelSha;
-    if (fixtureSha !== FIXTURE_SHA256) throw new Error(`frozen fixture hash mismatch: ${fixtureSha}`);
+    if (!frozen) throw new Error(`unknown frozen fixture id: ${String(fixtureDoc?.id)}`);
+    if (fixtureSha !== frozen.sha256) throw new Error(`frozen fixture hash mismatch: ${fixtureSha}`);
     if (kernelSha !== KERNEL_SHA256) throw new Error(`frozen kernel hash mismatch: ${kernelSha}`);
-    const fixtureDoc = JSON.parse(fixtureBytes.toString("utf8"));
     const fixtures: Fixture[] = fixtureDoc.cases;
-    if (fixtureDoc.id !== "git-kernel-v1" || !Array.isArray(fixtures) || fixtures.length !== 12) throw new Error("git-kernel-v1 must contain exactly 12 cases");
+    if (!Array.isArray(fixtures) || fixtures.length !== frozen.cases) throw new Error(`${fixtureDoc.id} must contain exactly ${frozen.cases} cases`);
     const prompt = userPrompt(fixtures);
     const temporaryDir = fs.mkdtempSync(path.join(os.tmpdir(), "arcrift-git-kernel-"));
     const promptPath = path.join(temporaryDir, "prompt.md");
