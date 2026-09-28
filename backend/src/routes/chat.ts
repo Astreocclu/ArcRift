@@ -55,7 +55,13 @@ router.post("/save", async (req: Request, res: Response) => {
     res.json({
       success: true,
       jobId,
-      message: "Syncing to brain initiated..."
+      message: "Syncing to brain initiated...",
+      // Extraction is async (background job). At sync-response time no triples
+      // have been extracted yet; surface an honest 0 + empty set so clients
+      // rendering `data.triplesExtracted ?? 0` don't misread a missing field as
+      // a failure. The job populates triples asynchronously after this returns.
+      triplesExtracted: 0,
+      triples: []
     });
   } catch (err) {
     logger.error("Chat save error:", err);

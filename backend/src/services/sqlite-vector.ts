@@ -14,6 +14,11 @@ const SESSION_THRESHOLD = 0.30;
 const SENTENCE_THRESHOLD = 0.30; // Lowered to ensure surgical RAG triggers on rephrased queries
 const GLOBAL_THRESHOLD = 0.30;
 
+// v1.6.4: HyDE is opt-in (default off). Raw queries in Pi/Gabriel workflows already use
+// document-like language; the DeepSeek round-trip (1.5-3.5s) is disproportionate to the
+// recall-quality gain on the common path. Enable per-project via ARCRIFT_HYDE_ENABLED=true.
+const HYDE_ENABLED = (process.env.ARCRIFT_HYDE_ENABLED || "false") === "true";
+
 /**
  * Splits text into sentences while preserving meaningful punctuation.
  */
@@ -129,8 +134,15 @@ export class SqliteVectorStore implements IVectorStore {
   }
 
   async retrieveRelevantChunks(query: string, sessionId: string, topN = 3, keywords: string[] = []): Promise<RetrievedChunk[]> {
-    const hydeAnswer = await generateHyDEAnswer(query);
-    const augmentedQuery = `${query}\n${hydeAnswer}`;
+    let augmentedQuery = query;
+    if (HYDE_ENABLED) {
+      try {
+        const hydeAnswer = await generateHyDEAnswer(query);
+        augmentedQuery = `${query}\n${hydeAnswer}`;
+      } catch (e) {
+        logger.warn(`HyDE failed, using raw query: ${e}`);
+      }
+    }
 
     const queryEmbedding = await generateEmbedding(augmentedQuery, "query");
     const vector = Buffer.from(new Float32Array(queryEmbedding).buffer);
@@ -250,7 +262,7 @@ export class SqliteVectorStore implements IVectorStore {
 
     try {
       let augmentedQuery = query;
-      if (!isSingleWord) {
+      if (HYDE_ENABLED && !isSingleWord) {
         try {
           const hydeAnswer = await generateHyDEAnswer(query);
           augmentedQuery = `${query}\n${hydeAnswer}`;
