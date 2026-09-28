@@ -29,3 +29,9 @@ selector-failures.json
 # Python runtime artifacts
 __pycache__/
 *.py[cod]
+
+# Local DB backups (personal data, never committed)
+backend/backups/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
